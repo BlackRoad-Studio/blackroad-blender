@@ -665,7 +665,7 @@ static void calc_shapeKeys(Object *obedit, ListBase *newnurbs)
   Nurb *newnu;
   int totvert = BKE_keyblock_curve_element_count(&editnurb->nurbs);
 
-  float(*ofs)[3] = nullptr;
+  float (*ofs)[3] = nullptr;
   std::optional<blender::Array<bool>> dependent;
   const float *oldkey, *ofp;
   float *newkey;
@@ -4052,10 +4052,10 @@ void CURVE_OT_handle_type_set(wmOperatorType *ot)
 {
   /* keep in sync with graphkeys_handle_type_items */
   static const EnumPropertyItem editcurve_handle_type_items[] = {
-      {HD_AUTO, "AUTOMATIC", 0, "Automatic", ""},
-      {HD_VECT, "VECTOR", 0, "Vector", ""},
-      {5, "ALIGNED", 0, "Aligned", ""},
-      {6, "FREE_ALIGN", 0, "Free", ""},
+      {HD_AUTO, "AUTOMATIC", ICON_HANDLE_AUTO, "Automatic", ""},
+      {HD_VECT, "VECTOR", ICON_HANDLE_VECTOR, "Vector", ""},
+      {5, "ALIGNED", ICON_HANDLE_ALIGNED, "Aligned", ""},
+      {6, "FREE_ALIGN", ICON_HANDLE_FREE, "Free", ""},
       {3, "TOGGLE_FREE_ALIGN", 0, "Toggle Free/Align", ""},
       {0, nullptr, 0, nullptr, nullptr},
   };

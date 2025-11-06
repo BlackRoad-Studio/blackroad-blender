@@ -240,10 +240,9 @@ class KeylistSummaryTest : public testing::Test {
      * Fill in the common bits for the mock bAnimContext, for an Action editor.
      *
      * Tests should fill in:
-     * - saction.action_slot_handle
      * - ac.obact
+     * - ac.active_action_user (= &ac.obact.id)
      */
-    saction.action = action;
     saction.ads.filterflag = eDopeSheet_FilterFlag(0);
     ac.bmain = bmain;
     ac.datatype = ANIMCONT_ACTION;
@@ -251,12 +250,14 @@ class KeylistSummaryTest : public testing::Test {
     ac.spacetype = SPACE_ACTION;
     ac.sl = reinterpret_cast<SpaceLink *>(&saction);
     ac.ads = &saction.ads;
+    ac.active_action = action;
   }
 
   void TearDown() override
   {
-    saction.action_slot_handle = blender::animrig::Slot::unassigned;
     ac.obact = nullptr;
+    ac.active_action = nullptr;
+    ac.active_action_user = nullptr;
 
     BKE_main_free(bmain);
     G_MAIN = nullptr;
@@ -287,8 +288,8 @@ TEST_F(KeylistSummaryTest, slot_summary_simple)
 
   /* Generate slot summary keylist. */
   AnimKeylist *keylist = ED_keylist_create();
-  saction.action_slot_handle = slot_cube.handle;
   ac.obact = cube;
+  ac.active_action_user = &cube->id;
   action_slot_summary_to_keylist(
       &ac, &cube->id, *action, slot_cube.handle, keylist, 0, {0.0, 6.0});
   ED_keylist_prepare_for_direct_access(keylist);
@@ -342,14 +343,18 @@ TEST_F(KeylistSummaryTest, slot_summary_bone_selection)
   ASSERT_EQ(SingleKeyingResult::SUCCESS, insert_vert_fcurve(&bone2_loc_x, {3.0, 3.0}, {}, {}));
 
   /* Select only Bone.001. */
-  bone1->flag |= BONE_SELECTED;
-  bone2->flag &= ~BONE_SELECTED;
+  bPoseChannel *pose_bone1 = BKE_pose_channel_find_name(armature->pose, bone1->name);
+  ASSERT_NE(pose_bone1, nullptr);
+  pose_bone1->flag |= POSE_SELECTED;
+  bPoseChannel *pose_bone2 = BKE_pose_channel_find_name(armature->pose, bone2->name);
+  pose_bone2->flag &= ~POSE_SELECTED;
 
   /* Generate slot summary keylist. */
   AnimKeylist *keylist = ED_keylist_create();
   saction.ads.filterflag = ADS_FILTER_ONLYSEL; /* Filter by selection. */
-  saction.action_slot_handle = slot_armature.handle;
   ac.obact = armature;
+  ac.active_action_user = &armature->id;
+  ac.filters.flag = eDopeSheet_FilterFlag(saction.ads.filterflag);
   action_slot_summary_to_keylist(
       &ac, &armature->id, *action, slot_armature.handle, keylist, 0, {0.0, 6.0});
   ED_keylist_prepare_for_direct_access(keylist);

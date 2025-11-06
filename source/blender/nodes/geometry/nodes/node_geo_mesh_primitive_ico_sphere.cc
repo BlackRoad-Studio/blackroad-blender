@@ -2,6 +2,8 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+#include "BLI_math_constants.h"
+
 #include "DNA_mesh_types.h"
 
 #include "BKE_lib_id.hh"
@@ -82,7 +84,7 @@ static Mesh *create_ico_sphere_mesh(const int subdivisions,
   /* Make sure the associated boolean layers exists as well. Normally this would be done when
    * adding a UV layer via python or when copying from Mesh, but when we 'manually' create the UV
    * layer we need to make sure the boolean layers exist as well. */
-  BM_uv_map_attr_select_and_pin_ensure(bm);
+  BM_uv_map_attr_pin_ensure_for_all_layers(bm);
 
   BMO_op_callf(bm,
                BMO_FLAG_DEFAULTS,

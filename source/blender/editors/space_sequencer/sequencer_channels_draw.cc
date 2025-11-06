@@ -14,6 +14,7 @@
 #include "BKE_context.hh"
 #include "BKE_screen.hh"
 
+#include "BLI_math_base.h"
 #include "BLI_string.h"
 #include "BLI_utildefines.h"
 
@@ -89,7 +90,7 @@ static void displayed_channel_range_get(const SeqChannelDrawContext *context,
 
 static std::string draw_channel_widget_tooltip(bContext * /*C*/,
                                                void *argN,
-                                               const blender::StringRef /*tip*/)
+                                               const StringRef /*tip*/)
 {
   char *dyn_tooltip = static_cast<char *>(argN);
   return dyn_tooltip;

@@ -56,12 +56,12 @@ static asset::AssetItemTree build_catalog_tree(const bContext &C)
   type_filter.id_types = FILTER_ID_NT;
   auto meta_data_filter = [&](const AssetMetaData &meta_data) {
     const IDProperty *tree_type = BKE_asset_metadata_idprop_find(&meta_data, "type");
-    if (tree_type == nullptr || IDP_Int(tree_type) != NTREE_GEOMETRY) {
+    if (tree_type == nullptr || IDP_int_get(tree_type) != NTREE_GEOMETRY) {
       return false;
     }
     const IDProperty *traits_flag = BKE_asset_metadata_idprop_find(
         &meta_data, "geometry_node_asset_traits_flag");
-    if (traits_flag == nullptr || !(IDP_Int(traits_flag) & GEO_NODE_ASSET_MODIFIER)) {
+    if (traits_flag == nullptr || !(IDP_int_get(traits_flag) & GEO_NODE_ASSET_MODIFIER)) {
       return false;
     }
     return true;
@@ -85,6 +85,7 @@ static void catalog_assets_draw(const bContext *C, Menu *menu)
   if (!menu_path) {
     return;
   }
+  const int skip_essentials = CTX_data_int_get(C, "skip_essentials").value_or(0);
   const Span<asset_system::AssetRepresentation *> assets = tree.assets_per_path.lookup(
       menu_path->data());
   const asset_system::AssetCatalogTreeItem *catalog_item = tree.catalogs.find_item(
@@ -96,16 +97,30 @@ static void catalog_assets_draw(const bContext *C, Menu *menu)
   }
 
   uiLayout *layout = menu->layout;
-  layout->separator();
+
+  bool first = true;
+  const auto ensure_separator = [&]() {
+    if (first) {
+      layout->separator();
+      first = false;
+    }
+  };
 
   wmOperatorType *ot = WM_operatortype_find("OBJECT_OT_modifier_add_node_group", true);
   for (const asset_system::AssetRepresentation *asset : assets) {
+    if (skip_essentials) {
+      if (asset->owner_asset_library().library_reference()->type == ASSET_LIBRARY_ESSENTIALS) {
+        continue;
+      }
+    }
+    ensure_separator();
     PointerRNA props_ptr = layout->op(
         ot, IFACE_(asset->get_name()), ICON_NONE, wm::OpCallContext::InvokeDefault, UI_ITEM_NONE);
     asset::operator_asset_reference_props_set(*asset, props_ptr);
   }
 
   catalog_item->foreach_child([&](const asset_system::AssetCatalogTreeItem &item) {
+    ensure_separator();
     asset::draw_menu_for_catalog(item, "OBJECT_MT_add_modifier_catalog_assets", *layout);
   });
 }
@@ -286,6 +301,11 @@ static wmOperatorStatus modifier_add_asset_exec(bContext *C, wmOperator *op)
 
     /* Don't show the data-block selector since it's not usually necessary for assets. */
     nmd->flag |= NODES_MODIFIER_HIDE_DATABLOCK_SELECTOR;
+    SET_FLAG_FROM_TEST(nmd->flag,
+                       node_group->geometry_node_asset_traits &&
+                           (node_group->geometry_node_asset_traits->flag &
+                            GEO_NODE_ASSET_HIDE_MODIFIER_MANAGE_PANEL),
+                       NODES_MODIFIER_HIDE_MANAGE_PANEL);
 
     STRNCPY_UTF8(nmd->modifier.name, DATA_(node_group->id.name + 2));
     BKE_modifier_unique_name(&object->modifiers, &nmd->modifier);
@@ -383,7 +403,9 @@ void object_modifier_add_asset_register()
   WM_operatortype_append(OBJECT_OT_modifier_add_node_group);
 }
 
-void ui_template_modifier_asset_menu_items(uiLayout &layout, const StringRef catalog_path)
+void ui_template_modifier_asset_menu_items(uiLayout &layout,
+                                           const StringRef catalog_path,
+                                           const bool skip_essentials)
 {
   asset::AssetItemTree &tree = *get_static_item_tree();
   const asset_system::AssetCatalogTreeItem *item = tree.catalogs.find_root_item(catalog_path);
@@ -395,9 +417,9 @@ void ui_template_modifier_asset_menu_items(uiLayout &layout, const StringRef cat
   if (!all_library) {
     return;
   }
-  layout.separator();
   uiLayout *col = &layout.column(false);
   col->context_string_set("asset_catalog_path", item->catalog_path().str());
+  col->context_int_set("skip_essentials", skip_essentials);
   col->menu_contents("OBJECT_MT_add_modifier_catalog_assets");
 }
 

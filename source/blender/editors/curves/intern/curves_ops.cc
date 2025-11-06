@@ -23,6 +23,7 @@
 
 #include "WM_api.hh"
 
+#include "BKE_attribute.h"
 #include "BKE_attribute_math.hh"
 #include "BKE_bvhutils.hh"
 #include "BKE_context.hh"
@@ -1192,8 +1193,7 @@ static wmOperatorStatus surface_set_exec(bContext *C, wmOperator *op)
   Object &new_surface_ob = *CTX_data_active_object(C);
 
   Mesh &new_surface_mesh = *static_cast<Mesh *>(new_surface_ob.data);
-  const char *new_uv_map_name = CustomData_get_active_layer_name(&new_surface_mesh.corner_data,
-                                                                 CD_PROP_FLOAT2);
+  const StringRef new_uv_map_name = new_surface_mesh.active_uv_map_name();
 
   CTX_DATA_BEGIN (C, Object *, selected_ob, selected_objects) {
     if (selected_ob->type != OB_CURVES) {
@@ -1203,8 +1203,8 @@ static wmOperatorStatus surface_set_exec(bContext *C, wmOperator *op)
     Curves &curves_id = *static_cast<Curves *>(curves_ob.data);
 
     MEM_SAFE_FREE(curves_id.surface_uv_map);
-    if (new_uv_map_name != nullptr) {
-      curves_id.surface_uv_map = BLI_strdup(new_uv_map_name);
+    if (!new_uv_map_name.is_empty()) {
+      curves_id.surface_uv_map = BLI_strdupn(new_uv_map_name.data(), new_uv_map_name.size());
     }
 
     bool missing_uvs;
@@ -1792,22 +1792,22 @@ static wmOperatorStatus exec(bContext *C, wmOperator *op)
 const EnumPropertyItem rna_enum_set_handle_type_items[] = {
     {int(SetHandleType::Auto),
      "AUTO",
-     0,
+     ICON_HANDLE_AUTO,
      "Auto",
      "The location is automatically calculated to be smooth"},
     {int(SetHandleType::Vector),
      "VECTOR",
-     0,
+     ICON_HANDLE_VECTOR,
      "Vector",
      "The location is calculated to point to the next/previous control point"},
     {int(SetHandleType::Align),
      "ALIGN",
-     0,
+     ICON_HANDLE_ALIGNED,
      "Align",
      "The location is constrained to point in the opposite direction as the other handle"},
     {int(SetHandleType::Free),
      "FREE_ALIGN",
-     0,
+     ICON_HANDLE_FREE,
      "Free",
      "The handle can be moved anywhere, and does not influence the point's other handle"},
     {int(SetHandleType::Toggle),
@@ -1867,6 +1867,8 @@ void operatortypes_curves()
   WM_operatortype_append(CURVES_OT_add_circle);
   WM_operatortype_append(CURVES_OT_add_bezier);
   WM_operatortype_append(CURVES_OT_handle_type_set);
+
+  ED_operatortypes_curves_pen();
 }
 
 void operatormacros_curves()
@@ -1898,6 +1900,8 @@ void keymap_curves(wmKeyConfig *keyconf)
   /* Only set in editmode curves, by space_view3d listener. */
   wmKeyMap *keymap = WM_keymap_ensure(keyconf, "Curves", SPACE_EMPTY, RGN_TYPE_WINDOW);
   keymap->poll = editable_curves_in_edit_mode_poll;
+
+  ED_curves_pentool_modal_keymap(keyconf);
 }
 
 }  // namespace blender::ed::curves

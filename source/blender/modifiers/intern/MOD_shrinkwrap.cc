@@ -95,7 +95,7 @@ static void deform_verts(ModifierData *md,
                             mesh,
                             dvert,
                             defgrp_index,
-                            reinterpret_cast<float(*)[3]>(positions.data()),
+                            reinterpret_cast<float (*)[3]>(positions.data()),
                             positions.size());
 }
 
@@ -215,4 +215,5 @@ ModifierTypeInfo modifierType_Shrinkwrap = {
     /*blend_write*/ nullptr,
     /*blend_read*/ nullptr,
     /*foreach_cache*/ nullptr,
+    /*foreach_working_space_color*/ nullptr,
 };

@@ -342,7 +342,7 @@ static void falloff_panel_draw(const bContext * /*C*/, Panel *panel)
   sub->use_property_split_set(false);
   row->prop(ptr, "invert_falloff", UI_ITEM_NONE, "", ICON_ARROW_LEFTRIGHT);
   if (RNA_enum_get(ptr, "falloff_type") == MOD_WVG_MAPPING_CURVE) {
-    uiTemplateCurveMapping(layout, ptr, "map_curve", 0, false, false, false, false);
+    uiTemplateCurveMapping(layout, ptr, "map_curve", 0, false, false, false, false, false);
   }
 }
 
@@ -421,4 +421,5 @@ ModifierTypeInfo modifierType_WeightVGEdit = {
     /*blend_write*/ blend_write,
     /*blend_read*/ blend_read,
     /*foreach_cache*/ nullptr,
+    /*foreach_working_space_color*/ nullptr,
 };

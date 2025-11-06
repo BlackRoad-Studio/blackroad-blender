@@ -72,7 +72,7 @@ class ViewerOperation : public NodeOperation {
   {
     const Result &image = this->get_input("Image");
 
-    float4 color = image.get_single_value<float4>();
+    Color color = image.get_single_value<Color>();
 
     const Domain domain = this->compute_domain();
     Result output = this->context().get_viewer_output(
@@ -134,7 +134,7 @@ class ViewerOperation : public NodeOperation {
       if (output_texel.x > bounds.max.x || output_texel.y > bounds.max.y) {
         return;
       }
-      output.store_pixel(texel + bounds.min, image.load_pixel<float4>(texel));
+      output.store_pixel(texel + bounds.min, image.load_pixel<Color>(texel));
     });
   }
 
@@ -144,7 +144,9 @@ class ViewerOperation : public NodeOperation {
   {
     /* Viewers are treated as composite outputs that should be in the bounds of the compositing
      * region. */
-    if (this->context().treat_viewer_as_compositor_output()) {
+    if (this->context().treat_viewer_as_compositor_output() &&
+        this->context().use_context_bounds_for_input_output())
+    {
       return this->context().get_compositing_region();
     }
 
@@ -156,7 +158,9 @@ class ViewerOperation : public NodeOperation {
   {
     /* Viewers are treated as composite outputs that should be in the domain of the compositing
      * region. */
-    if (context().treat_viewer_as_compositor_output()) {
+    if (this->context().treat_viewer_as_compositor_output() &&
+        this->context().use_context_bounds_for_input_output())
+    {
       return Domain(context().get_compositing_region_size());
     }
 

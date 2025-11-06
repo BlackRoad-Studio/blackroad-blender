@@ -21,7 +21,7 @@ const UserDef U_default = {
     .versionfile = BLENDER_FILE_VERSION,
     .subversionfile = BLENDER_FILE_SUBVERSION,
     .flag = (USER_AUTOSAVE | USER_TOOLTIPS | USER_RELPATHS | USER_RELEASECONFIRM |
-             USER_SCRIPT_AUTOEXEC_DISABLE),
+             USER_SCRIPT_AUTOEXEC_DISABLE | USER_FILECOMPRESS),
     .dupflag = USER_DUP_MESH | USER_DUP_CURVE | USER_DUP_SURF | USER_DUP_LATTICE | USER_DUP_FONT |
                USER_DUP_MBALL | USER_DUP_LAMP | USER_DUP_ARM | USER_DUP_CAMERA | USER_DUP_SPEAKER |
                USER_DUP_ACT | USER_DUP_LIGHTPROBE | USER_DUP_GPENCIL | USER_DUP_CURVES |
@@ -141,7 +141,7 @@ const UserDef U_default = {
     .pad_rot_angle = 15,
     .rvisize = 25,
     .rvibright = 8,
-    .recent_files = 20,
+    .recent_files = 200,
     .smooth_viewtx = 200,
     .glreslimit = 0,
     .color_picker_type = USER_CP_CIRCLE_HSV,
@@ -209,6 +209,14 @@ const UserDef U_default = {
             .flag = 0,
         },
 
+    .xr_navigation =
+        {
+            .vignette_intensity = 60.0f,
+            .turn_amount = DEG2RAD(30),
+            .turn_speed = DEG2RAD(60),
+            .flag = USER_XR_NAV_SNAP_TURN,
+        },
+
     .space_data =
         {
             .section_active = USER_SECTION_INTERFACE,
@@ -222,9 +230,16 @@ const UserDef U_default = {
             .details_flags = FILE_DETAILS_SIZE | FILE_DETAILS_DATETIME,
             .flag = FILE_HIDE_DOT,
             .filter_id = FILTER_ID_ALL,
+        },
 
-            .temp_win_sizex = 1060,
-            .temp_win_sizey = 600,
+    .stored_bounds =
+        {
+            .file = {100.0f, 1160.0f, 350.0f, 950.0f},
+            .userpref = {100.0f, 940.0f, 350.0f, 900.0f},
+            .image = {50.0f, 1360.0f, 50.0f, 830.0f},
+            .graph = {50.0f, 950.0f, 200.0f, 780.0f},
+            .info = {100.0f, 1000.0f, 300.0f, 880.0f},
+            .outliner = {100.0f, 550.0f, 350.0f, 800.0f},
         },
 
     .sequencer_proxy_setup = USER_SEQ_PROXY_SETUP_AUTOMATIC,

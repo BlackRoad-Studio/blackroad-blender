@@ -37,6 +37,7 @@
 #include "BLI_filereader.h"
 #include "BLI_linklist.h"
 #include "BLI_listbase.h"
+#include "BLI_math_base.h"
 #include "BLI_math_time.h"
 #include "BLI_memory_cache.hh"
 #include "BLI_string.h"
@@ -85,7 +86,7 @@
 #include "BKE_report.hh"
 #include "BKE_scene.hh"
 #include "BKE_screen.hh"
-#include "BKE_sound.h"
+#include "BKE_sound.hh"
 #include "BKE_undo_system.hh"
 #include "BKE_workspace.hh"
 
@@ -502,7 +503,7 @@ static void wm_gpu_backend_override_from_userdef()
     return;
   }
 
-  GPU_backend_type_selection_set_override(eGPUBackendType(U.gpu_backend));
+  GPU_backend_type_selection_set_override(GPUBackendType(U.gpu_backend));
 }
 
 /**
@@ -1040,6 +1041,14 @@ static void file_read_reports_finalize(BlendFileReadReport *bf_reports)
 
   BLI_linklist_free(bf_reports->resynced_lib_overrides_libraries, nullptr);
   bf_reports->resynced_lib_overrides_libraries = nullptr;
+
+  if (bf_reports->pre_animato_file_loaded) {
+    BKE_report(
+        bf_reports->reports,
+        RPT_WARNING,
+        "Loaded a pre-2.50 blend file, animation data has not been loaded. Open & save the file "
+        "with Blender v4.5 to convert animation data.");
+  }
 }
 
 bool WM_file_read(bContext *C,
@@ -2310,8 +2319,12 @@ static void wm_autosave_location(char filepath[FILE_MAX])
 
 static bool wm_autosave_write_try(Main *bmain, wmWindowManager *wm)
 {
-  char filepath[FILE_MAX];
+  if (wm->file_saved) {
+    /* When file is already saved, skip creating an auto-save file, see: #146003 */
+    return true;
+  }
 
+  char filepath[FILE_MAX];
   wm_autosave_location(filepath);
 
   /* Technically, we could always just save here, but that would cause performance regressions
@@ -3791,6 +3804,7 @@ static wmOperatorStatus wm_save_as_mainfile_exec(bContext *C, wmOperator *op)
     /* If saved file is the active one, there are technically no more compatibility issues, the
      * file on disk now matches the currently opened data version-wise. */
     bmain->has_forward_compatibility_issues = false;
+    bmain->colorspace.is_missing_opencolorio_config = false;
 
     /* If saved file is the active one, notify WM so that saved status and window title can be
      * updated. */
@@ -4382,6 +4396,17 @@ static void file_overwrite_detailed_info_show(uiLayout *parent_layout, Main *bma
                   ICON_NONE);
     layout->label(RPT_("saved as a new, regular file."), ICON_NONE);
   }
+
+  if (bmain->colorspace.is_missing_opencolorio_config) {
+    if (bmain->is_asset_edit_file || bmain->has_forward_compatibility_issues) {
+      layout->separator(1.4f);
+    }
+    layout->label(
+        RPT_("Displays, views or color spaces in this file were missing and have been changed."),
+        ICON_NONE);
+    layout->label(RPT_("Saving it with this OpenColorIO configuration may cause loss of data."),
+                  ICON_NONE);
+  }
 }
 
 static void save_file_overwrite_cancel(bContext *C, void *arg_block, void * /*arg_data*/)
@@ -4487,8 +4512,16 @@ static uiBlock *block_create_save_file_overwrite_dialog(bContext *C, ARegion *re
                true,
                false);
   }
-  else {
+  else if (!bmain->colorspace.is_missing_opencolorio_config) {
     BLI_assert_unreachable();
+  }
+
+  if (bmain->colorspace.is_missing_opencolorio_config) {
+    uiItemL_ex(layout,
+               RPT_("Overwrite file with current OpenColorIO configuration?"),
+               ICON_NONE,
+               true,
+               false);
   }
 
   /* Filename. */
@@ -4604,7 +4637,8 @@ static void wm_block_file_close_save(bContext *C, void *arg_block, void *arg_dat
   bool file_has_been_saved_before = BKE_main_blendfile_path(bmain)[0] != '\0';
 
   if (file_has_been_saved_before) {
-    if (bmain->has_forward_compatibility_issues) {
+    if (bmain->has_forward_compatibility_issues || bmain->colorspace.is_missing_opencolorio_config)
+    {
       /* Need to invoke to get the file-browser and choose where to save the new file.
        * This also makes it impossible to keep on going with current operation, which is why
        * callback cannot be executed anymore.
@@ -4697,7 +4731,8 @@ static uiBlock *block_create__close_file_dialog(bContext *C, ARegion *region, vo
       block, UI_BLOCK_KEEP_OPEN | UI_BLOCK_LOOP | UI_BLOCK_NO_WIN_CLIP | UI_BLOCK_NUMSELECT);
   UI_block_theme_style_set(block, UI_BLOCK_THEME_STYLE_POPUP);
 
-  uiLayout *layout = uiItemsAlertBox(block, 34, ALERT_ICON_QUESTION);
+  uiLayout *layout = uiItemsAlertBox(
+      block, (bmain->colorspace.is_missing_opencolorio_config) ? 44 : 34, ALERT_ICON_QUESTION);
 
   const bool needs_overwrite_confirm = BKE_main_needs_overwrite_confirm(bmain);
 
@@ -4755,7 +4790,7 @@ static uiBlock *block_create__close_file_dialog(bContext *C, ARegion *region, vo
   /* Modified Images Checkbox. */
   if (modified_images_count > 0) {
     char message[64];
-    SNPRINTF(message, "Save %u modified image(s)", modified_images_count);
+    SNPRINTF(message, RPT_("Save %u modified image(s)"), modified_images_count);
     /* Only the first checkbox should get extra separation. */
     if (!has_extra_checkboxes) {
       layout->separator();

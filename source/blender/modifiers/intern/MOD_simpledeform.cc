@@ -431,7 +431,7 @@ static void deform_verts(ModifierData *md,
                           ctx,
                           ctx->object,
                           mesh,
-                          reinterpret_cast<float(*)[3]>(positions.data()),
+                          reinterpret_cast<float (*)[3]>(positions.data()),
                           positions.size());
 }
 
@@ -544,4 +544,5 @@ ModifierTypeInfo modifierType_SimpleDeform = {
     /*blend_write*/ nullptr,
     /*blend_read*/ nullptr,
     /*foreach_cache*/ nullptr,
+    /*foreach_working_space_color*/ nullptr,
 };

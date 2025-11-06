@@ -2491,16 +2491,25 @@ def fbx_animations(scene_data):
 
     # All actions.
     if scene_data.settings.bake_anim_use_all_actions:
-        def validate_actions(act, path_resolve):
-            for fc in act.fcurves:
-                data_path = fc.data_path
-                if fc.array_index:
-                    data_path = data_path + "[%d]" % fc.array_index
-                try:
-                    path_resolve(data_path)
-                except ValueError:
-                    return False  # Invalid.
-            return True  # Valid.
+        def find_validate_action_slot(act, path_resolve) -> bpy.types.ActionSlot | None:
+            for layer in act.layers:
+                for strip in layer.strips:
+                    for channelbag in strip.channelbags:
+                        if not channelbag.fcurves:
+                            # Do not export empty Channelbags.
+                            continue
+                        for fc in channelbag.fcurves:
+                            data_path = fc.data_path
+                            if fc.array_index:
+                                data_path = data_path + "[%d]" % fc.array_index
+                            try:
+                                path_resolve(data_path)
+                            except ValueError:
+                                break  # Invalid, go to next strip.
+                        else:
+                            # Did not 'break', so all F-Curves are valid.
+                            return channelbag.slot
+            return None  # Found nothing to return.
 
         def restore_object(ob_to, ob_from):
             # Restore org state of object (ugh :/ ).
@@ -2540,14 +2549,20 @@ def fbx_animations(scene_data):
             pbones_matrices = [pbo.matrix_basis.copy() for pbo in ob.pose.bones] if ob.type == 'ARMATURE' else ...
 
             org_act = ob.animation_data.action
+            org_act_slot = ob.animation_data.action_slot
             path_resolve = ob.path_resolve
 
             for act in bpy.data.actions:
                 # For now, *all* paths in the action must be valid for the object, to validate the action.
                 # Unless that action was already assigned to the object!
-                if act != org_act and not validate_actions(act, path_resolve):
+                if act == org_act:
+                    act_slot = org_act_slot
+                else:
+                    act_slot = find_validate_action_slot(act, path_resolve)
+                if not act_slot:
                     continue
                 ob.animation_data.action = act
+                ob.animation_data.action_slot = act_slot
                 frame_start, frame_end = act.frame_range  # sic!
                 add_anim(animations, animated,
                          fbx_animations_do(scene_data, (ob, act), frame_start, frame_end, True,
@@ -2557,6 +2572,7 @@ def fbx_animations(scene_data):
                     for pbo, mat in zip(ob.pose.bones, pbones_matrices):
                         pbo.matrix_basis = mat.copy()
                 ob.animation_data.action = org_act
+                ob.animation_data.action_slot = org_act_slot
                 restore_object(ob, ob_copy)
                 scene.frame_set(scene.frame_current, subframe=0.0)
 
@@ -2564,6 +2580,7 @@ def fbx_animations(scene_data):
                 for pbo, mat in zip(ob.pose.bones, pbones_matrices):
                     pbo.matrix_basis = mat.copy()
             ob.animation_data.action = org_act
+            ob.animation_data.action_slot = org_act_slot
 
             bpy.data.objects.remove(ob_copy)
             scene.frame_set(scene.frame_current, subframe=0.0)
@@ -3052,9 +3069,22 @@ def fbx_data_from_scene(scene, depsgraph, settings):
 
     # Materials
     mesh_material_indices = {}
-    _objs_indices = {}
-    for ma, (ma_key, ob_objs) in data_materials.items():
-        for ob_obj in ob_objs:
+    for ob_obj in objects:
+        ob_mat_idx = 0
+        me = None
+        if ob_obj.type in BLENDER_OBJECT_TYPES_MESHLIKE:
+            _mesh_key, me, _free = data_meshes[ob_obj]
+        # NOTE: If a mesh has multiple material slots with the same material, they are combined into one
+        # single connexion (slot).
+        # Even if duplicate materials were exported without combining them into one slot, keeping duplicate
+        # materials separated does not appear to be common behavior of external software when importing FBX.
+        # Also, None (empty slots, no material) are always skipped/ignored.
+        done_materials_for_object = {None}
+        for ma in ob_obj.materials:
+            if ma in done_materials_for_object:
+                continue
+            done_materials_for_object.add(ma)
+            ma_key, _ob_objs = data_materials[ma]
             connections.append((b"OO", get_fbx_uuid_from_key(ma_key), ob_obj.fbx_uuid, None))
             # Get index of this material for this object (or dupliobject).
             # Material indices for mesh faces are determined by their order in 'ma to ob' connections.
@@ -3063,13 +3093,13 @@ def fbx_data_from_scene(scene, depsgraph, settings):
             # Should not be an issue in practice, and it's needed in case we export duplis but not the original!
             if ob_obj.type not in BLENDER_OBJECT_TYPES_MESHLIKE:
                 continue
-            _mesh_key, me, _free = data_meshes[ob_obj]
-            idx = _objs_indices[ob_obj] = _objs_indices.get(ob_obj, -1) + 1
-            # XXX If a mesh has multiple material slots with the same material, they are combined into one slot.
-            # Even if duplicate materials were exported without combining them into one slot, keeping duplicate
-            # materials separated does not appear to be common behavior of external software when importing FBX.
-            mesh_material_indices.setdefault(me, {})[ma] = idx
-    del _objs_indices
+            if ma not in mesh_material_indices.setdefault(me, {}):
+                mesh_material_indices[me][ma] = ob_mat_idx
+            else:
+                print("WARNING: Cannot register a valid material index for '{}' from '{}' mesh, '{}' object. "
+                      "Most likely, different objects using the same mesh, but different material slots layouts."
+                      "".format(ma.name, me.name, ob_obj.name))
+            ob_mat_idx += 1
 
     # Textures
     for (ma, sock_name), (tex_key, fbx_prop) in data_textures.items():

@@ -126,15 +126,16 @@ const IDFilterEnumPropertyItem rna_enum_id_type_filter_items[] = {
     {FILTER_ID_CF, "filter_cachefile", ICON_FILE, "Cache Files", "Show Cache File data-blocks"},
     {FILTER_ID_CU_LEGACY, "filter_curve", ICON_CURVE_DATA, "Curves", "Show Curve data-blocks"},
     {FILTER_ID_GD_LEGACY,
+     "filter_annotations",
+     ICON_OUTLINER_DATA_GREASEPENCIL,
+     "Annotations",
+     "Show Annotation data-blocks"},
+    {FILTER_ID_GP,
      "filter_grease_pencil",
      ICON_GREASEPENCIL,
      "Grease Pencil",
      "Show Grease Pencil data-blocks"},
-    {FILTER_ID_GR,
-     "filter_group",
-     ICON_OUTLINER_COLLECTION,
-     "Collections",
-     "Show Collection data-blocks"},
+    {FILTER_ID_GR, "filter_group", ICON_GROUP, "Collections", "Show Collection data-blocks"},
     {FILTER_ID_CV,
      "filter_curves",
      ICON_CURVES_DATA,
@@ -213,7 +214,7 @@ const IDFilterEnumPropertyItem rna_enum_id_type_filter_items[] = {
 
 #  include "BKE_anim_data.hh"
 #  include "BKE_global.hh" /* XXX, remove me */
-#  include "BKE_icons.h"
+#  include "BKE_icons.hh"
 #  include "BKE_idprop.hh"
 #  include "BKE_idtype.hh"
 #  include "BKE_lib_override.hh"
@@ -300,7 +301,12 @@ static int rna_ID_name_editable(const PointerRNA *ptr, const char **r_info)
    *       and could be useful in some cases. */
   if (!ID_IS_EDITABLE(id)) {
     if (r_info) {
-      *r_info = N_("Linked data-blocks cannot be renamed");
+      if (ID_IS_PACKED(id)) {
+        *r_info = N_("Packed data-blocks cannot be renamed");
+      }
+      else {
+        *r_info = N_("Linked data-blocks cannot be renamed");
+      }
     }
     return 0;
   }
@@ -385,7 +391,7 @@ short RNA_type_to_ID_code(const StructRNA *type)
   if (base_type == &RNA_Annotation) {
     return ID_GD_LEGACY;
   }
-  if (base_type == &RNA_GreasePencilv3) {
+  if (base_type == &RNA_GreasePencil) {
     return ID_GP;
   }
   if (base_type == &RNA_Collection) {
@@ -505,7 +511,7 @@ StructRNA *ID_code_to_RNA_type(short idcode)
     case ID_GD_LEGACY:
       return &RNA_Annotation;
     case ID_GP:
-      return &RNA_GreasePencilv3;
+      return &RNA_GreasePencil;
     case ID_GR:
       return &RNA_Collection;
     case ID_CV:
@@ -568,10 +574,6 @@ StructRNA *ID_code_to_RNA_type(short idcode)
       return &RNA_World;
     case ID_WS:
       return &RNA_WorkSpace;
-
-    /* deprecated */
-    case ID_IP:
-      break;
   }
 
   return &RNA_ID;
@@ -1156,7 +1158,7 @@ static void rna_IDPArray_begin(CollectionPropertyIterator *iter, PointerRNA *ptr
 {
   IDProperty *prop = (IDProperty *)ptr->data;
   rna_iterator_array_begin(
-      iter, ptr, IDP_IDPArray(prop), sizeof(IDProperty), prop->len, 0, nullptr);
+      iter, ptr, IDP_property_array_get(prop), sizeof(IDProperty), prop->len, 0, nullptr);
 }
 
 static int rna_IDPArray_length(PointerRNA *ptr)
@@ -1541,6 +1543,52 @@ static void rna_Library_version_get(PointerRNA *ptr, int *value)
   value[0] = lib->runtime->versionfile / 100;
   value[1] = lib->runtime->versionfile % 100;
   value[2] = lib->runtime->subversionfile;
+}
+
+static void rna_Library_archive_libraries_begin(CollectionPropertyIterator *iter, PointerRNA *ptr)
+{
+  iter->parent = *ptr;
+  Library *lib = static_cast<Library *>(ptr->data);
+
+  Library **archive_libraries_iter = lib->runtime->archived_libraries.begin();
+  iter->internal.custom = archive_libraries_iter;
+
+  iter->valid = archive_libraries_iter != lib->runtime->archived_libraries.end();
+}
+
+static void rna_Library_archive_libraries_next(CollectionPropertyIterator *iter)
+{
+  Library *lib = static_cast<Library *>(iter->parent.data);
+  Library **archive_libraries_iter = static_cast<Library **>(iter->internal.custom);
+
+  archive_libraries_iter++;
+  iter->internal.custom = archive_libraries_iter;
+
+  iter->valid = archive_libraries_iter != lib->runtime->archived_libraries.end();
+}
+
+static PointerRNA rna_Library_archive_libraries_get(CollectionPropertyIterator *iter)
+{
+  Library **archive_libraries_iter = static_cast<Library **>(iter->internal.custom);
+  return RNA_pointer_create_with_parent(iter->parent, &RNA_Library, *archive_libraries_iter);
+}
+
+static int rna_Library_archive_libraries_length(PointerRNA *ptr)
+{
+  Library *lib = static_cast<Library *>(ptr->data);
+  return int(lib->runtime->archived_libraries.size());
+}
+
+static bool rna_Library_archive_libraries_lookupint(PointerRNA *ptr, int key, PointerRNA *r_ptr)
+{
+  Library *lib = static_cast<Library *>(ptr->data);
+  if (key < 0 || key >= lib->runtime->archived_libraries.size()) {
+    return false;
+  }
+
+  Library *archive_library = lib->runtime->archived_libraries[key];
+  rna_pointer_create_with_ancestors(*ptr, &RNA_Library, archive_library, *r_ptr);
+  return true;
 }
 
 static PointerRNA rna_Library_parent_get(PointerRNA *ptr)
@@ -2182,7 +2230,7 @@ static void rna_def_ID_override_library(BlenderRNA *brna)
                   "",
                   "Enforce restoring the dependency hierarchy between data-blocks to match the "
                   "one from the reference linked hierarchy (WARNING: if some ID pointers have "
-                  "been purposedly overridden, these will be reset to their default value)");
+                  "been purposely overridden, these will be reset to their default value)");
   RNA_def_boolean(
       func,
       "do_whole_hierarchy",
@@ -2211,19 +2259,19 @@ static void rna_def_ID(BlenderRNA *brna)
        "NEVER",
        0,
        "Never Rename",
-       "Never rename an exisitng ID whose name would conflict, the currently renamed ID will get "
+       "Never rename an existing ID whose name would conflict, the currently renamed ID will get "
        "a numeric suffix appended to its new name"},
       {int(IDNewNameMode::RenameExistingAlways),
        "ALWAYS",
        0,
        "Always Rename",
-       "Always rename an exisitng ID whose name would conflict, ensuring that the currently "
+       "Always rename an existing ID whose name would conflict, ensuring that the currently "
        "renamed ID will get requested name"},
       {int(IDNewNameMode::RenameExistingSameRoot),
        "SAME_ROOT",
        0,
        "Rename If Same Root",
-       "Only rename an exisitng ID whose name would conflict if its name root (everything besides "
+       "Only rename an existing ID whose name would conflict if its name root (everything besides "
        "the numerical suffix) is the same as the existing name of the currently renamed ID"},
       {0, nullptr, 0, nullptr, nullptr},
   };
@@ -2249,7 +2297,7 @@ static void rna_def_ID(BlenderRNA *brna)
        "RENAMED_COLLISION_ADJUSTED",
        0,
        "Renamed With Collision",
-       "The ID was renamed with adjustement of the requested name, to avoid a name collision"},
+       "The ID was renamed with adjustment of the requested name, to avoid a name collision"},
       {int(IDNewNameResult::Action::RENAMED_COLLISION_FORCED),
        "RENAMED_COLLISION_FORCED",
        0,
@@ -2348,6 +2396,12 @@ static void rna_def_ID(BlenderRNA *brna)
       "Embedded Data",
       "This data-block is not an independent one, but is actually a sub-data of another ID "
       "(typical example: root node trees or master collections)");
+
+  prop = RNA_def_property(srna, "is_linked_packed", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, nullptr, "flag", ID_FLAG_LINKED_AND_PACKED);
+  RNA_def_property_clear_flag(prop, PROP_EDITABLE);
+  RNA_def_property_ui_text(
+      prop, "Linked Packed", "This data-block is linked and packed into the .blend file");
 
   prop = RNA_def_property(srna, "is_missing", PROP_BOOLEAN, PROP_NONE);
   RNA_def_property_boolean_sdna(prop, nullptr, "tag", ID_TAG_MISSING);
@@ -2670,6 +2724,39 @@ static void rna_def_library(BlenderRNA *brna)
                            "Editable",
                            "Data-blocks in this library are editable despite being linked. "
                            "Used by brush assets and their dependencies.");
+
+  prop = RNA_def_property(srna, "is_archive", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, nullptr, "flag", LIBRARY_FLAG_IS_ARCHIVE);
+  RNA_def_property_clear_flag(prop, PROP_EDITABLE);
+  RNA_def_property_ui_text(prop,
+                           "Is Archive",
+                           "This library is an 'archive' storage for packed linked IDs "
+                           "originally linked from its 'archive parent' library.");
+
+  prop = RNA_def_property(srna, "archive_parent_library", PROP_POINTER, PROP_NONE);
+  RNA_def_property_pointer_sdna(prop, nullptr, "archive_parent_library");
+  RNA_def_property_struct_type(prop, "Library");
+  RNA_def_property_override_flag(prop, PROPOVERRIDE_NO_COMPARISON);
+  RNA_def_property_ui_text(prop,
+                           "Parent Archive Library",
+                           "Source library from which this archive of packed IDs was generated");
+
+  prop = RNA_def_property(srna, "archive_libraries", PROP_COLLECTION, PROP_NONE);
+  RNA_def_property_struct_type(prop, "Library");
+  RNA_def_property_collection_funcs(prop,
+                                    "rna_Library_archive_libraries_begin",
+                                    "rna_Library_archive_libraries_next",
+                                    nullptr,
+                                    "rna_Library_archive_libraries_get",
+                                    "rna_Library_archive_libraries_length",
+                                    "rna_Library_archive_libraries_lookupint",
+                                    nullptr,
+                                    nullptr);
+  RNA_def_property_override_flag(prop, PROPOVERRIDE_NO_COMPARISON);
+  RNA_def_property_ui_text(
+      prop,
+      "Archive Libraries",
+      "Archive libraries of packed IDs, generated (and owned) by this source library");
 
   func = RNA_def_function(srna, "reload", "rna_Library_reload");
   RNA_def_function_flag(func, FUNC_USE_REPORTS | FUNC_USE_CONTEXT);

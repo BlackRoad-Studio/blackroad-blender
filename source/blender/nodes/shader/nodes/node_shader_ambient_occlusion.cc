@@ -4,6 +4,8 @@
 
 #include "node_shader_util.hh"
 
+#include "BLI_math_base.h"
+
 #include "UI_interface_layout.hh"
 #include "UI_resources.hh"
 
@@ -67,7 +69,7 @@ NODE_SHADER_MATERIALX_BEGIN
    * res.set_input("maxdistance", maxdistance);
    * \endcode
    */
-  return get_output_default(socket_out_->name, NodeItem::Type::Any);
+  return get_output_default(socket_out_->identifier, NodeItem::Type::Any);
 }
 #endif
 NODE_SHADER_MATERIALX_END

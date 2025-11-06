@@ -221,7 +221,7 @@ bool multires_reshape_context_create_from_object(MultiresReshapeContext *reshape
   reshape_context->top.grid_size = subdiv::grid_size_from_level(reshape_context->top.level);
 
   const bke::AttributeAccessor attributes = base_mesh->attributes();
-  reshape_context->cd_vertex_crease = *attributes.lookup<float>("crease_vert", AttrDomain::Point);
+  reshape_context->cd_vert_crease = *attributes.lookup<float>("crease_vert", AttrDomain::Point);
   reshape_context->cd_edge_crease = *attributes.lookup<float>("crease_edge", AttrDomain::Edge);
 
   context_init_common(reshape_context);
@@ -295,7 +295,7 @@ bool multires_reshape_context_create_from_subdiv(MultiresReshapeContext *reshape
   reshape_context->base_corner_edges = base_mesh->corner_edges();
 
   const bke::AttributeAccessor attributes = base_mesh->attributes();
-  reshape_context->cd_vertex_crease = *attributes.lookup<float>("crease_vert", AttrDomain::Point);
+  reshape_context->cd_vert_crease = *attributes.lookup<float>("crease_vert", AttrDomain::Point);
 
   reshape_context->subdiv = subdiv;
   reshape_context->need_free_subdiv = false;
@@ -531,10 +531,11 @@ ReshapeConstGridElement multires_reshape_orig_grid_element_for_grid_coord(
 /** \name Sample limit surface of the base mesh
  * \{ */
 
-void multires_reshape_evaluate_limit_at_grid(const MultiresReshapeContext *reshape_context,
-                                             const GridCoord *grid_coord,
-                                             blender::float3 &r_P,
-                                             blender::float3x3 &r_tangent_matrix)
+void multires_reshape_evaluate_base_mesh_limit_at_grid(
+    const MultiresReshapeContext *reshape_context,
+    const GridCoord *grid_coord,
+    blender::float3 &r_P,
+    blender::float3x3 &r_tangent_matrix)
 {
   blender::float3 dPdu;
   blender::float3 dPdv;
@@ -560,7 +561,7 @@ static void allocate_displacement_grid(MDisps *displacement_grid, const int leve
 {
   const int grid_size = blender::bke::subdiv::grid_size_from_level(level);
   const int grid_area = grid_size * grid_size;
-  float(*disps)[3] = MEM_calloc_arrayN<float[3]>(grid_area, "multires disps");
+  float (*disps)[3] = MEM_calloc_arrayN<float[3]>(grid_area, "multires disps");
   if (displacement_grid->disps != nullptr) {
     MEM_freeN(displacement_grid->disps);
   }
@@ -643,7 +644,7 @@ void multires_reshape_store_original_grids(MultiresReshapeContext *reshape_conte
      * Reshape process will ensure all grids are on top level, but that happens on separate set of
      * grids which eventually replaces original one. */
     if (orig_grid->disps != nullptr) {
-      orig_grid->disps = static_cast<float(*)[3]>(MEM_dupallocN(orig_grid->disps));
+      orig_grid->disps = static_cast<float (*)[3]>(MEM_dupallocN(orig_grid->disps));
     }
     if (orig_grid_paint_masks != nullptr) {
       GridPaintMask *orig_paint_mask_grid = &orig_grid_paint_masks[grid_index];
@@ -733,7 +734,8 @@ static void object_grid_element_to_tangent_displacement(
 {
   blender::float3 P;
   blender::float3x3 tangent_matrix;
-  multires_reshape_evaluate_limit_at_grid(reshape_context, grid_coord, P, tangent_matrix);
+  multires_reshape_evaluate_base_mesh_limit_at_grid(
+      reshape_context, grid_coord, P, tangent_matrix);
 
   const blender::float3x3 inv_tangent_matrix = blender::math::invert(tangent_matrix);
 
@@ -771,7 +773,8 @@ static void assign_final_coords_from_mdisps(const MultiresReshapeContext *reshap
 {
   blender::float3 P;
   blender::float3x3 tangent_matrix;
-  multires_reshape_evaluate_limit_at_grid(reshape_context, grid_coord, P, tangent_matrix);
+  multires_reshape_evaluate_base_mesh_limit_at_grid(
+      reshape_context, grid_coord, P, tangent_matrix);
 
   ReshapeGridElement grid_element = multires_reshape_grid_element_for_grid_coord(reshape_context,
                                                                                  grid_coord);
@@ -794,7 +797,8 @@ static void assign_final_elements_from_orig_mdisps(const MultiresReshapeContext 
 {
   blender::float3 P;
   blender::float3x3 tangent_matrix;
-  multires_reshape_evaluate_limit_at_grid(reshape_context, grid_coord, P, tangent_matrix);
+  multires_reshape_evaluate_base_mesh_limit_at_grid(
+      reshape_context, grid_coord, P, tangent_matrix);
 
   const ReshapeConstGridElement orig_grid_element =
       multires_reshape_orig_grid_element_for_grid_coord(reshape_context, grid_coord);

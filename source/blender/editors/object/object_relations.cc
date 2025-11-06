@@ -643,9 +643,18 @@ static bool parent_set_with_depsgraph(ReportList *reports,
             break;
           case PAR_LATTICE: /* lattice deform */
             if (BKE_modifiers_is_deformed_by_lattice(ob) != par) {
-              md = modifier_add(reports, bmain, scene, ob, nullptr, eModifierType_Lattice);
+              const bool is_grease_pencil = ob->type == OB_GREASE_PENCIL;
+              const ModifierType lattice_modifier_type = is_grease_pencil ?
+                                                             eModifierType_GreasePencilLattice :
+                                                             eModifierType_Lattice;
+              md = modifier_add(reports, bmain, scene, ob, nullptr, lattice_modifier_type);
               if (md) {
-                ((LatticeModifierData *)md)->object = par;
+                if (is_grease_pencil) {
+                  reinterpret_cast<GreasePencilLatticeModifierData *>(md)->object = par;
+                }
+                else {
+                  reinterpret_cast<LatticeModifierData *>(md)->object = par;
+                }
               }
             }
             break;
@@ -3113,6 +3122,11 @@ static wmOperatorStatus drop_geometry_nodes_invoke(bContext *C,
   if (!RNA_boolean_get(op->ptr, "show_datablock_in_modifier")) {
     nmd->flag |= NODES_MODIFIER_HIDE_DATABLOCK_SELECTOR;
   }
+  SET_FLAG_FROM_TEST(nmd->flag,
+                     node_tree->geometry_node_asset_traits &&
+                         (node_tree->geometry_node_asset_traits->flag &
+                          GEO_NODE_ASSET_HIDE_MODIFIER_MANAGE_PANEL),
+                     NODES_MODIFIER_HIDE_MANAGE_PANEL);
 
   nmd->node_group = node_tree;
   id_us_plus(&node_tree->id);

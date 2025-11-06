@@ -59,9 +59,11 @@ class ColorSpaceManager {
   /* Compute matrix to convert from XYZ to scene linear RGB, based on the config. */
   static Transform get_xyz_to_scene_linear_rgb();
   static Transform get_xyz_to_rec709();
+  static Transform get_xyz_to_rec2020();
+  static Transform get_xyz_to_acescg();
   /* Compute unique string for texture cache hashing and metadata. */
   static const string &get_xyz_to_scene_linear_rgb_string();
-  /* Determine if scene linear is linear Rec.709 */
+  /* Determine if scene linear is a common known space. */
   static bool get_scene_linear_is_rec709();
 
  private:

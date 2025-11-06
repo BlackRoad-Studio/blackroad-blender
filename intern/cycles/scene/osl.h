@@ -81,6 +81,8 @@ class OSLManager {
   const char *shader_load_filepath(string filepath);
   OSLShaderInfo *shader_loaded_info(const string &hash);
 
+  void shading_system_init(ShaderManager::SceneLinearSpace colorspace);
+
   OSL::ShadingSystem *get_shading_system(Device *sub_device);
   OSL::TextureSystem *get_texture_system();
   static void foreach_osl_device(Device *device,
@@ -92,7 +94,6 @@ class OSLManager {
 
  private:
 #ifdef WITH_OSL
-  void shading_system_init();
   void shading_system_free();
 
   void foreach_shading_system(const std::function<void(OSL::ShadingSystem *)> &callback);
@@ -150,7 +151,7 @@ class OSLShaderManager : public ShaderManager {
 class OSLCompiler {
  public:
 #ifdef WITH_OSL
-  OSLCompiler(OSL::ShadingSystem *ss, Scene *scene, Progress &progress);
+  OSLCompiler(OSL::ShadingSystem *ss, Scene *scene, Progress &progress, Device *device);
 #endif
   void compile(Shader *shader);
 
@@ -201,6 +202,7 @@ class OSLCompiler {
   OSL::ShaderGroupRef current_group;
 #endif
 
+  Device *device;
   ShaderType current_type;
   Shader *current_shader;
 

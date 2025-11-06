@@ -1404,10 +1404,7 @@ static void integrate_particle(
 {
 #define ZERO_F43 \
   { \
-    {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f}, \
-    { \
-      0.0f, 0.0f, 0.0f \
-    } \
+    {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f} \
   }
 
   ParticleKey states[5];
@@ -2442,7 +2439,7 @@ static float nr_distance_to_vert(float *p,
   return len_v3v3(p, pce->x0) - radius;
 }
 /**
- * \param t: is the current time for newton rhapson.
+ * \param t: is the current time for newton raphson.
  * \param fac: is the starting factor for current collision iteration.
  * \param col: The particle collision, `col->fac's` are factors for the
  * particle sub-frame step start and end during collision modifier step.
@@ -2784,8 +2781,8 @@ void BKE_psys_collision_neartest_cb(void *userdata,
   ParticleCollision *col = (ParticleCollision *)userdata;
   ParticleCollisionElement pce;
   const blender::int3 vert_tri = &col->md->vert_tris[index];
-  float(*x)[3] = col->md->x;
-  float(*v)[3] = col->md->current_v;
+  float (*x)[3] = col->md->x;
+  float (*v)[3] = col->md->current_v;
   float t = hit->dist / col->original_ray_length;
   int collision = 0;
 
@@ -3508,7 +3505,7 @@ static void do_hair_dynamics(ParticleSimulationData *sim)
       sim->scene,
       sim->ob,
       psys->hair_in_mesh,
-      reinterpret_cast<float(*)[3]>(psys->hair_out_mesh->vert_positions_for_write().data()));
+      reinterpret_cast<float (*)[3]>(psys->hair_out_mesh->vert_positions_for_write().data()));
   psys->hair_out_mesh->tag_positions_changed();
 
   /* restore cloth effector weights */

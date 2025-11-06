@@ -41,7 +41,7 @@
 #include "BKE_colortools.hh"
 #include "BKE_deform.hh"
 #include "BKE_gpencil_legacy.h"
-#include "BKE_icons.h"
+#include "BKE_icons.hh"
 #include "BKE_idtype.hh"
 #include "BKE_image.hh"
 #include "BKE_lib_id.hh"
@@ -282,6 +282,7 @@ IDTypeInfo IDType_ID_GD_LEGACY = {
     /*foreach_id*/ greasepencil_foreach_id,
     /*foreach_cache*/ nullptr,
     /*foreach_path*/ nullptr,
+    /*foreach_working_space_color*/ nullptr,
     /*owner_pointer_get*/ nullptr,
 
     /*blend_write*/ greasepencil_blend_write,

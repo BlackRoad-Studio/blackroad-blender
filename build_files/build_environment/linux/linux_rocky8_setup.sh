@@ -104,7 +104,7 @@ PACKAGES_FOR_LIBS=(
     # `export LD_LIBRARY_PATH=/usr/local/cuda-12.5/lib64${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}`
     # `export PATH=/usr/local/cuda-12.5/bin${PATH:+:${PATH}}`
     # Required by `external_openimagedenoise` (`nvcc` command)
-    cuda-toolkit
+    cuda-toolkit-12-8
 
     # Required by: `external_ispc`.
     zlib-devel
@@ -202,26 +202,26 @@ yum -y install jack-audio-connection-kit-devel
 
 # Register ROCm packages
 sudo rpm --import https://repo.radeon.com/rocm/rocm.gpg.key
-rm -f /etc/yum.repos.d/amdgpu-6.3.1.repo
-rm -f /etc/yum.repos.d/rocm-6.3.1.repo
-tee --append /etc/yum.repos.d/amdgpu-6.3.1.repo <<EOF
-[amdgpu-6.3.1]
-name=amdgpu-6.3.1
-baseurl=https://repo.radeon.com/amdgpu/6.3.1/el/8.10/main/x86_64/
+rm -f /etc/yum.repos.d/amdgpu-6.4.3.repo
+rm -f /etc/yum.repos.d/rocm-6.4.3.repo
+tee --append /etc/yum.repos.d/amdgpu-6.4.3.repo <<EOF
+[amdgpu-6.4.3]
+name=amdgpu-6.4.3
+baseurl=https://repo.radeon.com/amdgpu/6.4.3/el/8.10/main/x86_64/
 enabled=1
 priority=50
 gpgcheck=1
 gpgkey=https://repo.radeon.com/rocm/rocm.gpg.key
 EOF
-tee --append /etc/yum.repos.d/rocm-6.3.1.repo <<EOF
-[ROCm-6.3.1]
-name=ROCm-6.3.1
-baseurl=https://repo.radeon.com/rocm/el8/6.3.1/main
+tee --append /etc/yum.repos.d/rocm-6.4.3.repo <<EOF
+[ROCm-6.4.3]
+name=ROCm-6.4.3
+baseurl=https://repo.radeon.com/rocm/el8/6.4.3/main
 enabled=1
 gpgcheck=1
 exclude=rock-dkms
 gpgkey=https://repo.radeon.com/rocm/rocm.gpg.key
 EOF
 yum -y update
-sudo yum install -y hipcc6.3.1 hip-devel6.3.1 rocm-llvm6.3.1 rocm-core6.3.1 rocm-device-libs6.3.1
-sudo update-alternatives --set rocm /opt/rocm-6.3.1
+sudo yum install -y hipcc6.4.3 hip-devel6.4.3 rocm-llvm6.4.3 rocm-core6.4.3 rocm-device-libs6.4.3
+sudo update-alternatives --set rocm /opt/rocm-6.4.3

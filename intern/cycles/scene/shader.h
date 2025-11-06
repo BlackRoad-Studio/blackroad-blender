@@ -83,14 +83,20 @@ class Shader : public Node {
   NODE_SOCKET_API(bool, use_bump_map_correction)
   NODE_SOCKET_API(VolumeSampling, volume_sampling_method)
   NODE_SOCKET_API(int, volume_interpolation_method)
+  NODE_SOCKET_API(float, volume_step_rate)
 
   /* displacement */
   NODE_SOCKET_API(DisplacementMethod, displacement_method)
+
+  float prev_volume_step_rate;
+  bool prev_has_surface_shadow_transparency;
 
   /* synchronization */
   bool need_update_uvs;
   bool need_update_attribute;
   bool need_update_displacement;
+  bool need_update_shadow_transparency;
+  bool shadow_transparency_needs_realloc;
 
   /* If the shader has only volume components, the surface is assumed to
    * be transparent.
@@ -126,11 +132,14 @@ class Shader : public Node {
   uint id;
 
 #ifdef WITH_OSL
-  /* osl shading state references */
-  OSL::ShaderGroupRef osl_surface_ref;
-  OSL::ShaderGroupRef osl_surface_bump_ref;
-  OSL::ShaderGroupRef osl_volume_ref;
-  OSL::ShaderGroupRef osl_displacement_ref;
+  /* Compiled osl shading state references. */
+  struct OSLCache {
+    OSL::ShaderGroupRef surface;
+    OSL::ShaderGroupRef bump;
+    OSL::ShaderGroupRef displacement;
+    OSL::ShaderGroupRef volume;
+  };
+  map<Device *, OSLCache> osl_cache;
 #endif
 
   Shader();
@@ -155,6 +164,8 @@ class Shader : public Node {
   }
 
   bool need_update_geometry() const;
+
+  bool has_surface_shadow_transparency() const;
 };
 
 /* Shader Manager virtual base class
@@ -212,6 +223,13 @@ class ShaderManager {
 
   void init_xyz_transforms();
 
+  enum class SceneLinearSpace { Rec709, Rec2020, ACEScg, Unknown };
+
+  SceneLinearSpace get_scene_linear_space()
+  {
+    return scene_linear_space;
+  }
+
  protected:
   ShaderManager();
 
@@ -235,7 +253,7 @@ class ShaderManager {
   float3 rec709_to_r;
   float3 rec709_to_g;
   float3 rec709_to_b;
-  bool is_rec709;
+  SceneLinearSpace scene_linear_space;
   vector<float> thin_film_table;
 
   template<std::size_t n>

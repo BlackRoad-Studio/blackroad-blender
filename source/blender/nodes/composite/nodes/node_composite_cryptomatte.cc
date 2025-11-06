@@ -29,7 +29,9 @@
 
 #include "DNA_image_types.h"
 #include "DNA_scene_types.h"
+#include "DNA_space_types.h"
 
+#include "BKE_compositor.hh"
 #include "BKE_context.hh"
 #include "BKE_cryptomatte.hh"
 #include "BKE_global.hh"
@@ -39,9 +41,13 @@
 #include "BKE_main.hh"
 #include "BKE_node.hh"
 
+#include "UI_resources.hh"
+
 #include "MEM_guardedalloc.h"
 
 #include "RE_pipeline.h"
+
+#include "NOD_node_extra_info.hh"
 
 #include "COM_node_operation.hh"
 #include "COM_result.hh"
@@ -376,7 +382,7 @@ class BaseCryptoMatteOperation : public NodeOperation {
     parallel_for(domain.size, [&](const int2 texel) {
       /* Each layer stores two ranks, each rank contains a pair, the identifier and the coverage of
        * the entity identified by the identifier. */
-      float2 first_rank = first_layer.load_pixel<float4>(texel + lower_bound).xy();
+      float2 first_rank = float4(first_layer.load_pixel<Color>(texel + lower_bound)).xy();
       float id_of_first_rank = first_rank.x;
 
       /* There is no logic to this, we just compute arbitrary compressed versions of the identifier
@@ -386,7 +392,7 @@ class BaseCryptoMatteOperation : public NodeOperation {
       float green = float(hash_value << 8) / float(0xFFFFFFFFu);
       float blue = float(hash_value << 16) / float(0xFFFFFFFFu);
 
-      output.store_pixel(texel, float4(id_of_first_rank, green, blue, 1.0f));
+      output.store_pixel(texel, Color(id_of_first_rank, green, blue, 1.0f));
     });
   }
 
@@ -469,7 +475,7 @@ class BaseCryptoMatteOperation : public NodeOperation {
        * blur and transparency." ACM SIGGRAPH 2015 Posters. 2015. 1-1.
        */
       parallel_for(domain.size, [&](const int2 texel) {
-        float4 layer = layer_result.load_pixel<float4>(texel + lower_bound);
+        float4 layer = float4(layer_result.load_pixel<Color>(texel + lower_bound));
 
         /* Each Cryptomatte layer stores two ranks. */
         float2 first_rank = layer.xy();
@@ -545,11 +551,11 @@ class BaseCryptoMatteOperation : public NodeOperation {
     output.allocate_texture(domain);
 
     parallel_for(domain.size, [&](const int2 texel) {
-      float4 input_color = input.load_pixel<float4, true>(texel);
+      float4 input_color = float4(input.load_pixel<Color, true>(texel));
       float input_matte = matte.load_pixel<float>(texel);
 
       /* Premultiply the alpha to the image. */
-      output.store_pixel(texel, input_color * input_matte);
+      output.store_pixel(texel, Color(input_color * input_matte));
     });
   }
 
@@ -631,36 +637,44 @@ static void node_copy_cryptomatte(bNodeTree * /*dst_ntree*/,
   dest_node->storage = dest_nc;
 }
 
-static bool node_poll_cryptomatte(const blender::bke::bNodeType * /*ntype*/,
-                                  const bNodeTree *ntree,
-                                  const char **r_disabled_hint)
-{
-  if (STREQ(ntree->idname, "CompositorNodeTree")) {
-    Scene *scene;
-
-    /* See node_composit_poll_rlayers. */
-    for (scene = static_cast<Scene *>(G.main->scenes.first); scene;
-         scene = static_cast<Scene *>(scene->id.next))
-    {
-      if (scene->compositing_node_group == ntree) {
-        break;
-      }
-    }
-
-    if (scene == nullptr) {
-      *r_disabled_hint = RPT_(
-          "The node tree must be the compositing node group of any scene in the file");
-    }
-    return scene != nullptr;
-  }
-  *r_disabled_hint = RPT_("Not a compositor node tree");
-  return false;
-}
-
 static void node_update_cryptomatte(bNodeTree *ntree, bNode *node)
 {
   cmp_node_update_default(ntree, node);
   ntreeCompositCryptomatteUpdateLayerNames(node);
+}
+
+static void node_extra_info(NodeExtraInfoParams &parameters)
+{
+  if (parameters.node.custom1 != CMP_NODE_CRYPTOMATTE_SOURCE_RENDER) {
+    return;
+  }
+
+  SpaceNode *space_node = CTX_wm_space_node(&parameters.C);
+  if (space_node->node_tree_sub_type != SNODE_COMPOSITOR_SCENE) {
+    NodeExtraInfoRow row;
+    row.text = RPT_("Node Unsupported");
+    row.tooltip = TIP_(
+        "The Cryptomatte node in render mode is only supported for scene compositing");
+    row.icon = ICON_ERROR;
+    parameters.rows.append(std::move(row));
+    return;
+  }
+
+  /* EEVEE supports passes. */
+  const Scene *scene = CTX_data_scene(&parameters.C);
+  if (StringRef(scene->r.engine) == RE_engine_id_BLENDER_EEVEE) {
+    return;
+  }
+
+  if (!bke::compositor::is_viewport_compositor_used(parameters.C)) {
+    return;
+  }
+
+  NodeExtraInfoRow row;
+  row.text = RPT_("Passes Not Supported");
+  row.tooltip = TIP_("Render passes in the Viewport compositor are only supported in EEVEE");
+  row.icon = ICON_ERROR;
+  parameters.rows.append(std::move(row));
 }
 
 using namespace blender::compositor;
@@ -726,7 +740,7 @@ class CryptoMatteOperation : public BaseCryptoMatteOperation {
       const int cryptomatte_layers_count = int(math::ceil(view_layer->cryptomatte_levels / 2.0f));
       for (int i = 0; i < cryptomatte_layers_count; i++) {
         const std::string pass_name = fmt::format("{}{:02}", cryptomatte_type, i);
-        Result pass_result = this->context().get_input(scene, view_layer_index, pass_name.c_str());
+        Result pass_result = this->context().get_pass(scene, view_layer_index, pass_name.c_str());
 
         /* If this Cryptomatte layer wasn't found, then all later Cryptomatte layers can't be used
          * even if they were found. */
@@ -939,7 +953,7 @@ static void register_node_type_cmp_cryptomatte()
   blender::bke::node_type_size(ntype, 240, 100, 700);
   ntype.initfunc = file_ns::node_init_cryptomatte;
   ntype.initfunc_api = file_ns::node_init_api_cryptomatte;
-  ntype.poll = file_ns::node_poll_cryptomatte;
+  ntype.get_extra_info = file_ns::node_extra_info;
   ntype.updatefunc = file_ns::node_update_cryptomatte;
   blender::bke::node_type_storage(
       ntype, "NodeCryptomatte", file_ns::node_free_cryptomatte, file_ns::node_copy_cryptomatte);

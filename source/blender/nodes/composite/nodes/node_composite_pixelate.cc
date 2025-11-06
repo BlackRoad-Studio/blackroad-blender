@@ -24,11 +24,13 @@ namespace blender::nodes::node_composite_pixelate_cc {
 
 static void cmp_node_pixelate_declare(NodeDeclarationBuilder &b)
 {
-  b.add_input<decl::Color>("Color").structure_type(StructureType::Dynamic);
+  b.use_custom_socket_order();
+  b.allow_any_socket_order();
+  b.add_input<decl::Color>("Color").structure_type(StructureType::Dynamic).hide_value();
+  b.add_output<decl::Color>("Color").structure_type(StructureType::Dynamic).align_with_previous();
+
   b.add_input<decl::Int>("Size").default_value(1).min(1).description(
       "The number of pixels that correspond to the same output pixel");
-
-  b.add_output<decl::Color>("Color").structure_type(StructureType::Dynamic);
 }
 
 using namespace blender::compositor;
@@ -95,13 +97,13 @@ class PixelateOperation : public NodeOperation {
       float4 accumulated_color = float4(0.0f);
       for (int y = start.y; y < end.y; y++) {
         for (int x = start.x; x < end.x; x++) {
-          accumulated_color += input.load_pixel<float4>(int2(x, y));
+          accumulated_color += float4(input.load_pixel<Color>(int2(x, y)));
         }
       }
 
       int2 size = end - start;
       int count = size.x * size.y;
-      output.store_pixel(texel, accumulated_color / count);
+      output.store_pixel(texel, Color(accumulated_color / count));
     });
   }
 

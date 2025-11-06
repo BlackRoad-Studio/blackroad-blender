@@ -8,6 +8,8 @@
  * \ingroup sequencer
  */
 
+#include "BKE_fcurve.hh"
+
 #include "DNA_scene_types.h"
 #include "DNA_sequence_types.h"
 
@@ -16,6 +18,8 @@
 #include "IMB_metadata.hh"
 
 #include "RE_pipeline.h"
+
+#include "RNA_prototypes.hh"
 
 #include "SEQ_render.hh"
 #include "SEQ_time.hh"
@@ -102,11 +106,19 @@ static void init_noop(Strip * /*strip*/) {}
 
 static void load_noop(Strip * /*strip*/) {}
 
-static void free_noop(Strip * /*strip*/, const bool /*do_id_user*/) {}
+static void free_default(Strip *strip, const bool /*do_id_user*/)
+{
+  MEM_SAFE_FREE(strip->effectdata);
+}
 
 static int num_inputs_default()
 {
   return 2;
+}
+
+static void copy_effect_default(Strip *dst, const Strip *src, const int /*flag*/)
+{
+  dst->effectdata = MEM_dupallocN(src->effectdata);
 }
 
 static StripEarlyOut early_out_noop(const Strip * /*strip*/, float /*fac*/)
@@ -141,33 +153,36 @@ StripEarlyOut early_out_mul_input1(const Strip * /*strip*/, float fac)
   return StripEarlyOut::DoEffect;
 }
 
-static void get_default_fac_noop(const Scene * /*scene*/,
-                                 const Strip * /*strip*/,
-                                 float /*timeline_frame*/,
-                                 float *fac)
+void effect_ensure_initialized(Strip *strip)
 {
-  *fac = 1.0f;
+  if (strip->effectdata == nullptr) {
+    EffectHandle h = strip_effect_handle_get(strip);
+    if (h.init != nullptr) {
+      h.init(strip);
+    }
+  }
 }
 
-void get_default_fac_fade(const Scene *scene, const Strip *strip, float timeline_frame, float *fac)
+void effect_free(Strip *strip)
 {
-  *fac = float(timeline_frame - time_left_handle_frame_get(scene, strip));
-  *fac /= time_strip_length_get(scene, strip);
-  *fac = math::clamp(*fac, 0.0f, 1.0f);
+  EffectHandle h = strip_effect_handle_get(strip);
+  if (h.free != nullptr) {
+    h.free(strip, true);
+    BLI_assert(strip->effectdata == nullptr);
+  }
 }
 
-EffectHandle effect_handle_get(int strip_type)
+EffectHandle effect_handle_get(StripType strip_type)
 {
   EffectHandle rval;
 
   rval.init = init_noop;
   rval.num_inputs = num_inputs_default;
   rval.load = load_noop;
-  rval.free = free_noop;
+  rval.free = free_default;
   rval.early_out = early_out_noop;
-  rval.get_default_fac = get_default_fac_noop;
   rval.execute = nullptr;
-  rval.copy = nullptr;
+  rval.copy = copy_effect_default;
 
   switch (strip_type) {
     case STRIP_TYPE_CROSS:
@@ -185,26 +200,6 @@ EffectHandle effect_handle_get(int strip_type)
     case STRIP_TYPE_MUL:
       mul_effect_get_handle(rval);
       break;
-    case STRIP_TYPE_SCREEN:
-    case STRIP_TYPE_OVERLAY:
-    case STRIP_TYPE_COLOR_BURN:
-    case STRIP_TYPE_LINEAR_BURN:
-    case STRIP_TYPE_DARKEN:
-    case STRIP_TYPE_LIGHTEN:
-    case STRIP_TYPE_DODGE:
-    case STRIP_TYPE_SOFT_LIGHT:
-    case STRIP_TYPE_HARD_LIGHT:
-    case STRIP_TYPE_PIN_LIGHT:
-    case STRIP_TYPE_LIN_LIGHT:
-    case STRIP_TYPE_VIVID_LIGHT:
-    case STRIP_TYPE_BLEND_COLOR:
-    case STRIP_TYPE_HUE:
-    case STRIP_TYPE_SATURATION:
-    case STRIP_TYPE_VALUE:
-    case STRIP_TYPE_DIFFERENCE:
-    case STRIP_TYPE_EXCLUSION:
-      blend_mode_effect_get_handle(rval);
-      break;
     case STRIP_TYPE_COLORMIX:
       color_mix_effect_get_handle(rval);
       break;
@@ -219,9 +214,6 @@ EffectHandle effect_handle_get(int strip_type)
       break;
     case STRIP_TYPE_GLOW:
       glow_effect_get_handle(rval);
-      break;
-    case STRIP_TYPE_TRANSFORM:
-      transform_effect_get_handle(rval);
       break;
     case STRIP_TYPE_SPEED:
       speed_effect_get_handle(rval);
@@ -241,6 +233,69 @@ EffectHandle effect_handle_get(int strip_type)
     case STRIP_TYPE_TEXT:
       text_effect_get_handle(rval);
       break;
+    default:
+      break;
+  }
+
+  return rval;
+}
+
+static EffectHandle effect_handle_for_blend_mode_get(StripBlendMode blend)
+{
+  EffectHandle rval;
+
+  rval.init = init_noop;
+  rval.num_inputs = num_inputs_default;
+  rval.load = load_noop;
+  rval.free = free_default;
+  rval.early_out = early_out_noop;
+  rval.execute = nullptr;
+  rval.copy = nullptr;
+
+  switch (blend) {
+    case STRIP_BLEND_CROSS:
+      cross_effect_get_handle(rval);
+      break;
+    case STRIP_BLEND_ADD:
+      add_effect_get_handle(rval);
+      break;
+    case STRIP_BLEND_SUB:
+      sub_effect_get_handle(rval);
+      break;
+    case STRIP_BLEND_ALPHAOVER:
+      alpha_over_effect_get_handle(rval);
+      break;
+    case STRIP_BLEND_ALPHAUNDER:
+      alpha_under_effect_get_handle(rval);
+      break;
+    case STRIP_BLEND_GAMCROSS:
+      gamma_cross_effect_get_handle(rval);
+      break;
+    case STRIP_BLEND_MUL:
+      mul_effect_get_handle(rval);
+      break;
+    case STRIP_BLEND_SCREEN:
+    case STRIP_BLEND_LIGHTEN:
+    case STRIP_BLEND_DODGE:
+    case STRIP_BLEND_DARKEN:
+    case STRIP_BLEND_COLOR_BURN:
+    case STRIP_BLEND_LINEAR_BURN:
+    case STRIP_BLEND_OVERLAY:
+    case STRIP_BLEND_HARD_LIGHT:
+    case STRIP_BLEND_SOFT_LIGHT:
+    case STRIP_BLEND_PIN_LIGHT:
+    case STRIP_BLEND_LIN_LIGHT:
+    case STRIP_BLEND_VIVID_LIGHT:
+    case STRIP_BLEND_HUE:
+    case STRIP_BLEND_SATURATION:
+    case STRIP_BLEND_VALUE:
+    case STRIP_BLEND_BLEND_COLOR:
+    case STRIP_BLEND_DIFFERENCE:
+    case STRIP_BLEND_EXCLUSION:
+      blend_mode_effect_get_handle(rval);
+      break;
+    default:
+      break;
   }
 
   return rval;
@@ -250,8 +305,8 @@ EffectHandle strip_effect_handle_get(Strip *strip)
 {
   EffectHandle rval = {};
 
-  if (strip->type & STRIP_TYPE_EFFECT) {
-    rval = effect_handle_get(strip->type);
+  if (strip->is_effect()) {
+    rval = effect_handle_get(StripType(strip->type));
     if ((strip->runtime.flag & STRIP_EFFECT_NOT_LOADED) != 0) {
       rval.load(strip);
       strip->runtime.flag &= ~STRIP_EFFECT_NOT_LOADED;
@@ -261,18 +316,18 @@ EffectHandle strip_effect_handle_get(Strip *strip)
   return rval;
 }
 
-EffectHandle strip_effect_get_sequence_blend(Strip *strip)
+EffectHandle strip_blend_mode_handle_get(Strip *strip)
 {
   EffectHandle rval = {};
 
-  if (strip->blend_mode != 0) {
+  if (strip->blend_mode != STRIP_BLEND_REPLACE) {
     if ((strip->runtime.flag & STRIP_EFFECT_NOT_LOADED) != 0) {
       /* load the effect first */
-      rval = effect_handle_get(strip->type);
+      rval = effect_handle_get(StripType(strip->type));
       rval.load(strip);
     }
 
-    rval = effect_handle_get(strip->blend_mode);
+    rval = effect_handle_for_blend_mode_get(StripBlendMode(strip->blend_mode));
     if ((strip->runtime.flag & STRIP_EFFECT_NOT_LOADED) != 0) {
       /* now load the blend and unset unloaded flag */
       rval.load(strip);
@@ -283,15 +338,43 @@ EffectHandle strip_effect_get_sequence_blend(Strip *strip)
   return rval;
 }
 
+static float transition_fader_calc(const Scene *scene, const Strip *strip, float timeline_frame)
+{
+  float fac = float(timeline_frame - time_left_handle_frame_get(scene, strip));
+  fac /= time_strip_length_get(scene, strip);
+  fac = math::clamp(fac, 0.0f, 1.0f);
+  return fac;
+}
+
+float effect_fader_calc(Scene *scene, Strip *strip, float timeline_frame)
+{
+  if (strip->flag & SEQ_USE_EFFECT_DEFAULT_FADE) {
+    if (effect_is_transition(StripType(strip->type))) {
+      return transition_fader_calc(scene, strip, timeline_frame);
+    }
+    return 1.0f;
+  }
+
+  const FCurve *fcu = id_data_find_fcurve(
+      &scene->id, strip, &RNA_Strip, "effect_fader", 0, nullptr);
+  if (fcu) {
+    return evaluate_fcurve(fcu, timeline_frame);
+  }
+  return strip->effect_fader;
+}
+
 int effect_get_num_inputs(int strip_type)
 {
-  EffectHandle rval = effect_handle_get(strip_type);
-
-  int count = rval.num_inputs();
-  if (rval.execute) {
-    return count;
+  EffectHandle rval = effect_handle_get(StripType(strip_type));
+  if (rval.execute == nullptr) {
+    return 0;
   }
-  return 0;
+  return rval.num_inputs();
+}
+
+bool effect_is_transition(StripType type)
+{
+  return ELEM(type, STRIP_TYPE_CROSS, STRIP_TYPE_GAMCROSS, STRIP_TYPE_WIPE);
 }
 
 }  // namespace blender::seq

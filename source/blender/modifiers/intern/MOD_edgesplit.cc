@@ -97,7 +97,7 @@ Mesh *doEdgeSplit(const Mesh *mesh, EdgeSplitModifierData *emd)
   BM_mesh_edgesplit(bm, false, true, false);
 
   /* Uncomment for troubleshooting. */
-  // BM_mesh_validate(bm);
+  // BM_mesh_is_valid(bm);
 
   result = BKE_mesh_from_bmesh_for_eval_nomain(bm, nullptr, mesh);
   BM_mesh_free(bm);
@@ -190,4 +190,5 @@ ModifierTypeInfo modifierType_EdgeSplit = {
     /*blend_write*/ nullptr,
     /*blend_read*/ nullptr,
     /*foreach_cache*/ nullptr,
+    /*foreach_working_space_color*/ nullptr,
 };

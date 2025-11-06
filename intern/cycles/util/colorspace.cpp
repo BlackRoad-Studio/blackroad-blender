@@ -564,6 +564,38 @@ Transform ColorSpaceManager::get_xyz_to_rec709()
                         0.0f);
 }
 
+Transform ColorSpaceManager::get_xyz_to_rec2020()
+{
+  return make_transform(1.7166512f,
+                        -0.3556708f,
+                        -0.2533663f,
+                        0.0f,
+                        -0.6666844,
+                        1.6164812f,
+                        0.0157685f,
+                        0.0f,
+                        0.0176399f,
+                        -0.0427706f,
+                        0.9421031f,
+                        0.0f);
+}
+
+Transform ColorSpaceManager::get_xyz_to_acescg()
+{
+  return transform_inverse(make_transform(0.652238f,
+                                          0.128237f,
+                                          0.169983f,
+                                          0.0f,
+                                          0.267672f,
+                                          0.674340f,
+                                          0.057988f,
+                                          0.0f,
+                                          -0.005382f,
+                                          0.001369f,
+                                          1.093071f,
+                                          0.0f));
+}
+
 Transform ColorSpaceManager::get_xyz_to_scene_linear_rgb()
 {
   Transform xyz_to_rgb = get_xyz_to_rec709();

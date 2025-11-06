@@ -17,6 +17,7 @@
 #include "DNA_texture_types.h"
 
 #include "BKE_colorband.hh"
+#include "BKE_idtype.hh"
 #include "BKE_key.hh"
 
 void BKE_colorband_init(ColorBand *coba, bool rangetype)
@@ -313,7 +314,7 @@ static float colorband_hue_interp(
   int mode = 0;
 
 #define HUE_INTERP(h_a, h_b) ((mfac * (h_a)) + (fac * (h_b)))
-#define HUE_MOD(h) (((h) < 1.0f) ? (h) : (h)-1.0f)
+#define HUE_MOD(h) (((h) < 1.0f) ? (h) : (h) - 1.0f)
 
   h1 = HUE_MOD(h1);
   h2 = HUE_MOD(h2);
@@ -646,4 +647,12 @@ bool BKE_colorband_element_remove(ColorBand *coba, int index)
     coba->cur--;
   }
   return true;
+}
+
+void BKE_colorband_foreach_working_space_color(ColorBand *coba,
+                                               const IDTypeForeachColorFunctionCallback &fn)
+{
+  for (int a = 0; a < coba->tot; a++) {
+    fn.single(&coba->data[a].r);
+  }
 }

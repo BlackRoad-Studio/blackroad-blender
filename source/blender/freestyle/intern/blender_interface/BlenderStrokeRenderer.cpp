@@ -28,6 +28,7 @@
 #include "DNA_scene_types.h"
 #include "DNA_screen_types.h"
 
+#include "BKE_attribute.h"
 #include "BKE_attribute.hh"
 #include "BKE_collection.hh"
 #include "BKE_customdata.hh"
@@ -233,7 +234,6 @@ Material *BlenderStrokeRenderer::GetStrokeShader(Main *bmain,
     ntree = blender::bke::node_tree_add_tree_embedded(
         nullptr, &ma->id, "stroke_shader", "ShaderNodeTree");
   }
-  ma->use_nodes = true;
   ma->blend_method = MA_BM_HASHED;
 
   bNode *input_attr_color = blender::bke::node_add_static_node(nullptr, *ntree, SH_NODE_ATTRIBUTE);
@@ -820,8 +820,8 @@ void BlenderStrokeRenderer::GenerateStrokeMesh(StrokeGroup *group, bool hasTex)
           transp += 3;
         }
       }  // loop over strip vertices
-    }    // loop over strips
-  }      // loop over strokes
+    }  // loop over strips
+  }  // loop over strokes
 
   BKE_object_materials_sync_length(freestyle_bmain, object_mesh, (ID *)mesh);
 

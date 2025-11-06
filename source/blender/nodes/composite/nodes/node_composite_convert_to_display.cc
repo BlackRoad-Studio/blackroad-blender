@@ -47,8 +47,7 @@ static void node_init(bNodeTree * /*ntree*/, bNode *node)
 {
   NodeConvertToDisplay *nctd = MEM_callocN<NodeConvertToDisplay>(__func__);
   BKE_color_managed_display_settings_init(&nctd->display_settings);
-  BKE_color_managed_view_settings_init_render(
-      &nctd->view_settings, &nctd->display_settings, nullptr);
+  BKE_color_managed_view_settings_init(&nctd->view_settings, &nctd->display_settings, nullptr);
   nctd->view_settings.flag |= COLORMANAGE_VIEW_ONLY_VIEW_LOOK;
   node->storage = nctd;
 }
@@ -157,7 +156,7 @@ class ConvertToDisplayOperation : public NodeOperation {
   {
     const NodeConvertToDisplay &nctd = node_storage(bnode());
     ColormanageProcessor *color_processor = IMB_colormanagement_display_processor_new(
-        &nctd.view_settings, &nctd.display_settings, DISPLAY_SPACE_FILE_OUTPUT, do_inverse());
+        &nctd.view_settings, &nctd.display_settings, DISPLAY_SPACE_VIDEO_OUTPUT, do_inverse());
 
     Result &input_image = get_input("Image");
 
@@ -166,7 +165,7 @@ class ConvertToDisplayOperation : public NodeOperation {
     output_image.allocate_texture(domain);
 
     parallel_for(domain.size, [&](const int2 texel) {
-      output_image.store_pixel(texel, input_image.load_pixel<float4>(texel));
+      output_image.store_pixel(texel, input_image.load_pixel<Color>(texel));
     });
 
     IMB_colormanagement_processor_apply(color_processor,
@@ -182,10 +181,10 @@ class ConvertToDisplayOperation : public NodeOperation {
   {
     const NodeConvertToDisplay &nctd = node_storage(bnode());
     ColormanageProcessor *color_processor = IMB_colormanagement_display_processor_new(
-        &nctd.view_settings, &nctd.display_settings, DISPLAY_SPACE_FILE_OUTPUT, do_inverse());
+        &nctd.view_settings, &nctd.display_settings, DISPLAY_SPACE_VIDEO_OUTPUT, do_inverse());
 
     Result &input_image = get_input("Image");
-    float4 color = input_image.get_single_value<float4>();
+    Color color = input_image.get_single_value<Color>();
 
     IMB_colormanagement_processor_apply_pixel(color_processor, color, 3);
     IMB_colormanagement_processor_free(color_processor);

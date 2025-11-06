@@ -210,6 +210,8 @@ set(SRC_KERNEL_SVM_HEADERS
   svm/normal.h
   svm/ramp.h
   svm/ramp_util.h
+  svm/radial_tiling.h
+  svm/radial_tiling_shared.h
   svm/sepcomb_color.h
   svm/sepcomb_vector.h
   svm/sky.h
@@ -462,6 +464,46 @@ endif()
 
 # CUDA module
 
+function(cuda_add_common_flags cuda_version arch in_flags out_flags)
+  set(flags ${in_flags})
+
+  if(CUDA_HOST_COMPILER)
+    set(flags ${flags} -ccbin="${CUDA_HOST_COMPILER}")
+  endif()
+
+  set(flags ${flags}
+    # Helps with compatibility when using recent clang host compiler.
+    "-std=c++17"
+    --use_fast_math
+    -Wno-deprecated-gpu-targets)
+
+  if(WITH_CYCLES_DEBUG)
+    set(flags ${flags}
+      -D WITH_CYCLES_DEBUG
+      --ptxas-options="-v")
+  endif()
+
+  if(WITH_NANOVDB)
+    set(flags ${flags} -D WITH_NANOVDB)
+  endif()
+
+  if("${cuda_version}" GREATER_EQUAL 123 AND "${arch}" STREQUAL "sm_120")
+    # Enable jump table generation for the SVM switch statement.
+    set(flags ${flags} --jump-table-density 80)
+  endif()
+
+  if(NOT WITH_CYCLES_CUDA_BUILD_SERIAL AND "${cuda_version}" GREATER_EQUAL 129)
+    # Only use split compile with few binaries, to avoid excessive memory usage.
+    # This is mainly helpful for quick local builds for one architecture.
+    list(LENGTH CYCLES_CUDA_BINARIES_ARCH _num_binaries)
+    if(_num_binaries LESS_EQUAL 2)
+      set(flags ${flags} --split-compile=0)
+    endif()
+  endif()
+
+  set(${out_flags} ${flags} PARENT_SCOPE)
+endfunction()
+
 if(WITH_CYCLES_CUDA_BINARIES)
   # 64 bit only
   set(CUDA_BITS 64)
@@ -519,33 +561,9 @@ if(WITH_CYCLES_CUDA_BINARIES)
       -m ${CUDA_BITS}
       -I ${CMAKE_CURRENT_SOURCE_DIR}/..
       -I ${CMAKE_CURRENT_SOURCE_DIR}/device/cuda
-      --use_fast_math
-      -o ${CMAKE_CURRENT_BINARY_DIR}/${cuda_file}
-      -Wno-deprecated-gpu-targets)
+      -o ${CMAKE_CURRENT_BINARY_DIR}/${cuda_file})
 
-    if(CUDA_HOST_COMPILER)
-      set(cuda_flags ${cuda_flags}
-        -ccbin="${CUDA_HOST_COMPILER}")
-    endif()
-
-    if(WITH_NANOVDB)
-      set(cuda_flags ${cuda_flags}
-        -D WITH_NANOVDB)
-    endif()
-
-    if(WITH_CYCLES_DEBUG)
-      set(cuda_flags ${cuda_flags}
-        -D WITH_CYCLES_DEBUG
-        --ptxas-options="-v")
-    endif()
-
-    if(NOT WITH_CYCLES_CUDA_BUILD_SERIAL AND "${cuda_version}" GREATER_EQUAL 129)
-      set(cuda_flags ${cuda_flags}
-        --split-compile=0)
-    endif()
-
-    # Helps with compatibility when using recent clang host compiler.
-    set(cuda_flags ${cuda_flags} -std=c++17)
+    cuda_add_common_flags(${cuda_version} ${arch} "${cuda_flags}" cuda_flags)
 
     set(_cuda_nvcc_args
       -arch=${arch}
@@ -831,28 +849,11 @@ if(WITH_CYCLES_CUDA_BINARIES AND WITH_CYCLES_DEVICE_OPTIX)
       -I "${OPTIX_INCLUDE_DIR}"
       -I "${CMAKE_CURRENT_SOURCE_DIR}/.."
       -I "${CMAKE_CURRENT_SOURCE_DIR}/device/cuda"
-      --use_fast_math
-      -Wno-deprecated-gpu-targets
       -o ${output})
-
-    if(CUDA_HOST_COMPILER)
-      set(cuda_flags ${cuda_flags}
-        -ccbin="${CUDA_HOST_COMPILER}")
-    endif()
-
-    if(WITH_NANOVDB)
-      set(cuda_flags ${cuda_flags}
-        -D WITH_NANOVDB)
-    endif()
 
     if(WITH_CYCLES_OSL)
       set(cuda_flags ${cuda_flags}
         -D OSL_LIBRARY_VERSION_CODE=${OSL_LIBRARY_VERSION_CODE})
-    endif()
-
-    if(WITH_CYCLES_DEBUG)
-      set(cuda_flags ${cuda_flags}
-        -D WITH_CYCLES_DEBUG)
     endif()
 
     set(arch compute_50)
@@ -860,7 +861,7 @@ if(WITH_CYCLES_CUDA_BINARIES AND WITH_CYCLES_DEVICE_OPTIX)
     set(cuda_version ${CUDA_VERSION})
     if("${CUDA_VERSION}" GREATER_EQUAL 130) # Support for Maxwell, Pascal and Volta was dropped in CUDA 13
       if(DEFINED CUDA11_NVCC_EXECUTABLE)
-        # Use CUDA 11 for the OptiX PTX kernel, to retain support for older achitectures
+        # Use CUDA 11 for the OptiX PTX kernel, to retain support for older architectures.
         set(cuda_nvcc_executable ${CUDA11_NVCC_EXECUTABLE})
         set(cuda_version 110)
       else()
@@ -868,10 +869,7 @@ if(WITH_CYCLES_CUDA_BINARIES AND WITH_CYCLES_DEVICE_OPTIX)
       endif()
     endif()
 
-    if(NOT WITH_CYCLES_CUDA_BUILD_SERIAL AND "${cuda_version}" GREATER_EQUAL 129)
-      set(cuda_flags ${cuda_flags}
-        --split-compile=0)
-    endif()
+    cuda_add_common_flags(${cuda_version} ${arch} "${cuda_flags}" cuda_flags)
 
     add_custom_command(
       OUTPUT
@@ -886,7 +884,6 @@ if(WITH_CYCLES_CUDA_BINARIES AND WITH_CYCLES_DEVICE_OPTIX)
       COMMAND
         ${cuda_nvcc_executable}
         --ptx
-        -std=c++17
         -arch=${arch}
         ${cuda_flags}
         ${input}
@@ -1128,25 +1125,6 @@ if(WITH_CYCLES_DEVICE_ONEAPI)
       -D_CRT_SECURE_NO_DEPRECATE
       -DONEAPI_EXPORT
     )
-
-    string(REPLACE /Redist/ /Tools/ MSVC_TOOLS_DIR ${MSVC_REDIST_DIR})
-    # Version Folder between Redist and Tools can mismatch sometimes
-    if(NOT EXISTS ${MSVC_TOOLS_DIR})
-      get_filename_component(cmake_ar_dir ${CMAKE_AR} DIRECTORY)
-      get_filename_component(MSVC_TOOLS_DIR "${cmake_ar_dir}/../../../" ABSOLUTE)
-    endif()
-    if(CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION)
-      set(WINDOWS_KIT_DIR ${WINDOWS_KITS_DIR}/Lib/${CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION})
-    else() # case for Ninja on Windows
-      get_filename_component(cmake_mt_dir ${CMAKE_MT} DIRECTORY)
-      string(REPLACE /bin/ /Lib/ WINDOWS_KIT_DIR ${cmake_mt_dir})
-      get_filename_component(WINDOWS_KIT_DIR "${WINDOWS_KIT_DIR}/../" ABSOLUTE)
-    endif()
-    list(APPEND sycl_compiler_flags
-      -L"${MSVC_TOOLS_DIR}/lib/x64"
-      -L"${WINDOWS_KIT_DIR}/um/x64"
-      -L"${WINDOWS_KIT_DIR}/ucrt/x64"
-    )
   else() # Add Linux specific compiler flags.
     list(APPEND sycl_compiler_flags -fPIC)
     list(APPEND sycl_compiler_flags -fvisibility=hidden)
@@ -1178,11 +1156,15 @@ if(WITH_CYCLES_DEVICE_ONEAPI)
       -nostdlib
       -Xclang --dependent-lib=msvcrtd
     )
+
+    list(APPEND sycl_compiler_flags
+      -L"${sycl_compiler_root}/../lib" # To find sycl.lib
+      -L"${sycl_compiler_root}/../compiler/lib/intel64_win" # To find libircmt.lib (when using `icpx`)
+    )
+
     add_custom_command(
       OUTPUT ${cycles_kernel_oneapi_lib} ${cycles_kernel_oneapi_linker_lib}
       COMMAND ${CMAKE_COMMAND} -E env
-        # Set `LIB` for the compiler to find `sycl.lib` and in case of `icpx`, `libircmt.lib`.
-        "LIB=${sycl_compiler_root}/../lib\;${sycl_compiler_root}/../compiler/lib/intel64_win"
         "PATH=${OCLOC_INSTALL_DIR}\;${sycl_compiler_root}"
         ${SYCL_COMPILER}
         "$<$<CONFIG:Release>:${sycl_compiler_flags_Release}>"

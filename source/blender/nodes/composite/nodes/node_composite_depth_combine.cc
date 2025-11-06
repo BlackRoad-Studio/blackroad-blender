@@ -28,24 +28,14 @@ static void cmp_node_zcombine_declare(NodeDeclarationBuilder &b)
 {
   b.add_input<decl::Color>("A")
       .default_value({1.0f, 1.0f, 1.0f, 1.0f})
-      .compositor_domain_priority(0)
       .structure_type(StructureType::Dynamic);
-  b.add_input<decl::Float>("Depth A")
-      .default_value(1.0f)
-      .min(0.0f)
-      .max(10000.0f)
-      .compositor_domain_priority(2)
-      .structure_type(StructureType::Dynamic);
+  b.add_input<decl::Float>("Depth A").default_value(1.0f).min(0.0f).max(10000.0f).structure_type(
+      StructureType::Dynamic);
   b.add_input<decl::Color>("B")
       .default_value({1.0f, 1.0f, 1.0f, 1.0f})
-      .compositor_domain_priority(1)
       .structure_type(StructureType::Dynamic);
-  b.add_input<decl::Float>("Depth B")
-      .default_value(1.0f)
-      .min(0.0f)
-      .max(10000.0f)
-      .compositor_domain_priority(3)
-      .structure_type(StructureType::Dynamic);
+  b.add_input<decl::Float>("Depth B").default_value(1.0f).min(0.0f).max(10000.0f).structure_type(
+      StructureType::Dynamic);
   b.add_input<decl::Bool>("Use Alpha")
       .default_value(false)
       .description(
@@ -85,8 +75,8 @@ class ZCombineOperation : public NodeOperation {
 
   void execute_single_value()
   {
-    const float4 first_color = get_input("A").get_single_value<float4>();
-    const float4 second_color = get_input("B").get_single_value<float4>();
+    const float4 first_color = float4(get_input("A").get_single_value<Color>());
+    const float4 second_color = float4(get_input("B").get_single_value<Color>());
     const float first_z_value = get_input("Depth A").get_single_value<float>();
     const float second_z_value = get_input("Depth B").get_single_value<float>();
 
@@ -107,7 +97,7 @@ class ZCombineOperation : public NodeOperation {
       combined_color.w = use_alpha() ? math::max(second_color.w, first_color.w) : combined_color.w;
 
       combined.allocate_single_value();
-      combined.set_single_value(combined_color);
+      combined.set_single_value(Color(combined_color));
     }
 
     Result &combined_z = get_result("Depth");
@@ -207,8 +197,8 @@ class ZCombineOperation : public NodeOperation {
     if (combined.should_compute()) {
       combined.allocate_texture(domain);
       parallel_for(domain.size, [&](const int2 texel) {
-        float4 first_color = first.load_pixel<float4, true>(texel);
-        float4 second_color = second.load_pixel<float4, true>(texel);
+        float4 first_color = float4(first.load_pixel<Color, true>(texel));
+        float4 second_color = float4(second.load_pixel<Color, true>(texel));
         float first_z_value = first_z.load_pixel<float, true>(texel);
         float second_z_value = second_z.load_pixel<float, true>(texel);
 
@@ -222,7 +212,7 @@ class ZCombineOperation : public NodeOperation {
 
         /* Use the more opaque alpha from the two images. */
         combined_color.w = use_alpha ? math::max(second_color.w, first_color.w) : combined_color.w;
-        combined.store_pixel(texel, combined_color);
+        combined.store_pixel(texel, Color(combined_color));
       });
     }
 
@@ -331,8 +321,8 @@ class ZCombineOperation : public NodeOperation {
     if (combined.should_compute()) {
       combined.allocate_texture(domain);
       parallel_for(domain.size, [&](const int2 texel) {
-        float4 first_color = first.load_pixel<float4, true>(texel);
-        float4 second_color = second.load_pixel<float4, true>(texel);
+        float4 first_color = float4(first.load_pixel<Color, true>(texel));
+        float4 second_color = float4(second.load_pixel<Color, true>(texel));
         float mask_value = mask.load_pixel<float>(texel);
 
         /* Choose the closer pixel as the foreground, that is, the masked pixel with the lower z
@@ -345,7 +335,7 @@ class ZCombineOperation : public NodeOperation {
 
         /* Use the more opaque alpha from the two images. */
         combined_color.w = use_alpha ? math::max(second_color.w, first_color.w) : combined_color.w;
-        combined.store_pixel(texel, combined_color);
+        combined.store_pixel(texel, Color(combined_color));
       });
     }
 

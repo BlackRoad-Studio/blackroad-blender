@@ -118,7 +118,9 @@ set_property(GLOBAL PROPERTY ICON_GEOM_NAMES
   ops.mesh.rip_edge
   ops.mesh.spin
   ops.mesh.vertices_smooth
+  ops.node.add_reroute
   ops.node.links_cut
+  ops.node.links_mute
   ops.paint.eyedropper_add
   ops.paint.vertex_color_fill
   ops.paint.weight_fill
@@ -243,6 +245,14 @@ if(WITH_BLENDER)
       clipuv_dehlt
       clipuv_hlt
       collapsemenu
+      collection_color_01
+      collection_color_02
+      collection_color_03
+      collection_color_04
+      collection_color_05
+      collection_color_06
+      collection_color_07
+      collection_color_08
       collection_new
       color
       color_blue
@@ -262,6 +272,7 @@ if(WITH_BLENDER)
       con_floor
       con_followpath
       con_followtrack
+      con_geometryattribute
       con_kinematic
       con_locktrack
       con_loclike
@@ -564,10 +575,14 @@ if(WITH_BLENDER)
       mod_array
       mod_bevel
       mod_boolean
+      mod_brightness_contrast
       mod_build
       mod_cast
       mod_cloth
+      mod_color_balance
       mod_curve
+      mod_curve_to_tube
+      mod_curves
       mod_dash
       mod_data_transfer
       mod_decim
@@ -578,6 +593,7 @@ if(WITH_BLENDER)
       mod_explode
       mod_fluid
       mod_fluidsim
+      mod_hue_correct
       mod_hue_saturation
       mod_instance
       mod_lattice
@@ -597,6 +613,7 @@ if(WITH_BLENDER)
       mod_particle_instance
       mod_physics
       mod_remesh
+      mod_scatter_on_surface
       mod_screw
       mod_shrinkwrap
       mod_simpledeform
@@ -609,11 +626,13 @@ if(WITH_BLENDER)
       mod_thickness
       mod_time
       mod_tint
+      mod_tonemap
       mod_triangulate
       mod_uvproject
       mod_vertex_weight
       mod_warp
       mod_wave
+      mod_white_balance
       mod_wireframe
       monkey
       mouse_lmb
@@ -779,7 +798,6 @@ if(WITH_BLENDER)
       rigid_body
       rigid_body_constraint
       rna
-      rna_add
       rndcurve
       rootcurve
       scene
@@ -802,6 +820,7 @@ if(WITH_BLENDER)
       seq_splitview
       seq_strip_duplicate
       seq_strip_meta
+      seq_strip_modifier
       settings
       shaderfx
       shading_bbox

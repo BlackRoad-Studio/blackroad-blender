@@ -67,6 +67,7 @@ BLOCKLIST_OPTIX_OSL_ALL = BLOCKLIST_OPTIX_OSL_LIMITED + [
     'principled_bsdf_bevel_emission_137420.blend',
     # Dicing tests use wireframe node which doesn't appear to be supported with OptiX OSL
     'dicing_camera.blend',
+    'object_dicing.blend',
     'offscreen_dicing.blend',
     'panorama_dicing.blend',
     # Error during rendering. Need to investigate why.
@@ -75,6 +76,13 @@ BLOCKLIST_OPTIX_OSL_ALL = BLOCKLIST_OPTIX_OSL_LIMITED + [
 
 
 BLOCKLIST_METAL = []
+
+BLOCKLIST_METAL_RT = [
+    # Metal RT uses different parameterization for linear curves.
+    # See discussion in #146072
+    # https://projects.blender.org/blender/blender/issues/146072#issuecomment-1699788
+    'hair_linear_close_up.blend',
+]
 
 if platform.system() == "Darwin":
     version, _, _ = platform.mac_ver()
@@ -109,18 +117,21 @@ BLOCKLIST_GPU = [
 
 
 class CyclesReport(render_report.Report):
-    def __init__(self, title, test_dir_name, output_dir, oiiotool, device=None, blocklist=[], osl=False):
+    def __init__(self, title, test_dir_name, output_dir, oiiotool, device=None, blocklist=[], osl=False, ray_marching=False):
         # Split device name in format "<device_type>[-<RT>]" into individual
         # tokens, setting the RT suffix to an empty string if its not specified.
         self.device, suffix = (device.split("-") + [""])[:2]
         self.use_hwrt = (suffix == "RT")
         self.osl = osl
+        self.ray_marching = ray_marching
 
         variation = self.device
         if suffix:
             variation += ' ' + suffix
         if self.osl:
             variation += ' OSL'
+        if ray_marching:
+            variation += ' Ray Marching'
 
 
         # Use texture cache directory in output folder, and clear it to test auto generating.
@@ -130,14 +141,21 @@ class CyclesReport(render_report.Report):
 
         super().__init__(title, output_dir, oiiotool, variation, blocklist)
 
+        self.set_pixelated(True)
+        self.set_reference_dir("cycles_renders")
+        if device == 'CPU':
+            self.set_compare_engine('eevee')
+        else:
+            self.set_compare_engine('cycles', 'CPU')
+
     def _get_render_arguments(self, arguments_cb, filepath, base_output_filepath):
-        return arguments_cb(filepath, base_output_filepath, self.use_hwrt, self.osl, self.texture_cache_dir)
+        return arguments_cb(filepath, base_output_filepath, self.use_hwrt, self.osl, self.ray_marching, self.texture_cache_dir)
 
     def _get_arguments_suffix(self):
         return ['--', '--cycles-device', self.device] if self.device else []
 
 
-def get_arguments(filepath, output_filepath, use_hwrt, osl, texture_cache_dir):
+def get_arguments(filepath, output_filepath, use_hwrt, osl, ray_marching, texture_cache_dir):
     dirname = os.path.dirname(filepath)
     basedir = os.path.dirname(dirname)
     subject = os.path.basename(dirname)
@@ -178,6 +196,9 @@ def get_arguments(filepath, output_filepath, use_hwrt, osl, texture_cache_dir):
     if osl:
         args.extend(["--python-expr", "import bpy; bpy.context.scene.cycles.shading_system = True"])
 
+    if ray_marching:
+        args.extend(["--python-expr", "import bpy; bpy.context.scene.cycles.volume_biased = True"])
+
     texture_cache_pref = "bpy.context.preferences.filepaths.texture_cache_directory"
     args.extend(["--python-expr", f"import bpy; {texture_cache_pref} = \"{texture_cache_dir}\""])
 
@@ -205,6 +226,14 @@ def create_argparse():
     return parser
 
 
+def test_volume_ray_marching(args, device, blocklist):
+    # Default volume rendering algorithm is null scattering, but we also want to test ray marching
+    test_dir_name = Path(args.testdir).name
+    report = CyclesReport('Cycles', test_dir_name, args.outdir, args.oiiotool, device, blocklist, args.osl == 'all', ray_marching=True)
+    report.set_reference_dir("cycles_ray_marching_renders")
+    return report.run(args.testdir, args.blender, get_arguments, batch=args.batch)
+
+
 def main():
     parser = create_argparse()
     args = parser.parse_args()
@@ -229,18 +258,16 @@ def main():
             blocklist += BLOCKLIST_OPTIX_OSL_LIMITED
         elif args.osl == 'all':
             blocklist += BLOCKLIST_OPTIX_OSL_ALL
+
     if device == 'METAL':
         blocklist += BLOCKLIST_METAL
+    if device == 'METAL-RT':
+        blocklist += BLOCKLIST_METAL
+        blocklist += BLOCKLIST_METAL_RT
+
 
     test_dir_name = Path(args.testdir).name
-
     report = CyclesReport('Cycles', test_dir_name, args.outdir, args.oiiotool, device, blocklist, args.osl == 'all')
-    report.set_pixelated(True)
-    report.set_reference_dir("cycles_renders")
-    if device == 'CPU':
-        report.set_compare_engine('eevee')
-    else:
-        report.set_compare_engine('cycles', 'CPU')
 
     # Increase threshold for motion blur, see #78777.
     #
@@ -258,7 +285,7 @@ def main():
         report.set_fail_threshold(0.032)
 
     # Layer mixing is different between SVM and OSL, so a few tests have
-    # noticably different noise causing OSL Principled BSDF tests to fail.
+    # noticeably different noise causing OSL Principled BSDF tests to fail.
     if ((args.osl == 'all') and (test_dir_name == 'principled_bsdf')):
         report.set_fail_threshold(0.06)
 
@@ -271,8 +298,14 @@ def main():
     if (test_dir_name in {'volume', 'openvdb'}):
         report.set_fail_threshold(0.048)
         report.set_fail_percent(3)
+    # OSL blackbody output is a little different.
+    if (test_dir_name in {'colorspace'}):
+        report.set_fail_threshold(0.05)
 
     ok = report.run(args.testdir, args.blender, get_arguments, batch=args.batch)
+
+    if (test_dir_name == 'volume'):
+        ok = ok and test_volume_ray_marching(args, device, blocklist)
 
     sys.exit(not ok)
 

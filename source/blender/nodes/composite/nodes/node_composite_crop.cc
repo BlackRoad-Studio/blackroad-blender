@@ -27,9 +27,14 @@ namespace blender::nodes::node_composite_crop_cc {
 
 static void cmp_node_crop_declare(NodeDeclarationBuilder &b)
 {
+  b.use_custom_socket_order();
+  b.allow_any_socket_order();
   b.add_input<decl::Color>("Image")
       .default_value({1.0f, 1.0f, 1.0f, 1.0f})
+      .hide_value()
       .structure_type(StructureType::Dynamic);
+  b.add_output<decl::Color>("Image").structure_type(StructureType::Dynamic).align_with_previous();
+
   b.add_input<decl::Int>("X")
       .default_value(0)
       .min(0)
@@ -56,8 +61,6 @@ static void cmp_node_crop_declare(NodeDeclarationBuilder &b)
       .description(
           "Sets the areas outside of the crop region to be transparent instead of actually "
           "cropping the size of the image");
-
-  b.add_output<decl::Color>("Image").structure_type(StructureType::Dynamic);
 }
 
 using namespace blender::compositor;
@@ -135,8 +138,8 @@ class CropOperation : public NodeOperation {
       bool is_inside = texel.x >= bounds.min.x && texel.y >= bounds.min.y &&
                        texel.x < bounds.max.x && texel.y < bounds.max.y;
       /* Write the pixel color if it is inside the cropping region, otherwise, write zero. */
-      float4 color = is_inside ? input.load_pixel<float4>(texel) : float4(0.0f);
-      output.store_pixel(texel, color);
+      float4 color = is_inside ? float4(input.load_pixel<Color>(texel)) : float4(0.0f);
+      output.store_pixel(texel, Color(color));
     });
   }
 
@@ -187,7 +190,7 @@ class CropOperation : public NodeOperation {
     output.allocate_texture(Domain(size, this->compute_domain().transformation));
 
     parallel_for(size, [&](const int2 texel) {
-      output.store_pixel(texel, input.load_pixel<float4>(texel + bounds.min));
+      output.store_pixel(texel, input.load_pixel<Color>(texel + bounds.min));
     });
   }
 

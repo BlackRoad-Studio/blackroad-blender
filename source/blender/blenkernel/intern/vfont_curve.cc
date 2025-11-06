@@ -1404,7 +1404,7 @@ static bool vfont_to_curve(Object *ob,
     }
     else if (mode == FO_LINE_END) {
       /* Line wrap aware line end. */
-      while ((ef->pos + 1 < slen) && (chartransdata[ef->pos + 1].linenr == ct->linenr)) {
+      while ((ef->pos < slen) && (chartransdata[ef->pos + 1].linenr == ct->linenr)) {
         ef->pos += 1;
       }
     }
@@ -1764,7 +1764,7 @@ static bool vfont_to_curve(Object *ob,
 
         const float charwidth = vfont_char_width(cu, che, info);
         const float charhalf = (charwidth / 2.0f);
-        if (cursor_location.x <= ((chartransdata[i].offset.y + charhalf) * font_size)) {
+        if (cursor_location.x <= ((chartransdata[i].offset.x + charhalf) * font_size)) {
           break;
         }
       }

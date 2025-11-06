@@ -129,7 +129,7 @@ static void view3d_ob_drop_on_enter(wmDropBox *drop, wmDrag *drag)
     AssetMetaData *meta_data = WM_drag_get_asset_meta_data(drag, ID_OB);
     IDProperty *dimensions_prop = BKE_asset_metadata_idprop_find(meta_data, "dimensions");
     if (dimensions_prop) {
-      copy_v3_v3(dimensions, static_cast<float *>(IDP_Array(dimensions_prop)));
+      copy_v3_v3(dimensions, IDP_array_float_get(dimensions_prop));
     }
   }
 
@@ -308,7 +308,7 @@ static bool view3d_geometry_nodes_drop_poll(bContext *C, wmDrag *drag, const wmE
     }
     const AssetMetaData *metadata = &asset_data->asset->get_metadata();
     const IDProperty *tree_type = BKE_asset_metadata_idprop_find(metadata, "type");
-    if (!tree_type || IDP_Int(tree_type) != NTREE_GEOMETRY) {
+    if (!tree_type || IDP_int_get(tree_type) != NTREE_GEOMETRY) {
       return false;
     }
     if (wmDropBox *drop_box = drag->drop_state.active_dropbox) {
@@ -511,7 +511,7 @@ static void view3d_collection_drop_copy_external_asset(bContext *C, wmDrag *drag
 
   /* XXX Without an undo push here, there will be a crash when the user modifies operator
    * properties. The stuff we do in these drop callbacks just isn't safe over undo/redo. */
-  ED_undo_push(C, "Collection_Drop");
+  ED_undo_push(C, "Drop Collection");
 }
 
 static void view3d_id_drop_copy(bContext *C, wmDrag *drag, wmDropBox *drop)
@@ -519,7 +519,6 @@ static void view3d_id_drop_copy(bContext *C, wmDrag *drag, wmDropBox *drop)
   ID *id = WM_drag_get_local_ID_or_import_from_asset(C, drag, 0);
 
   WM_operator_properties_id_lookup_set_from_id(drop->ptr, id);
-  RNA_boolean_set(drop->ptr, "show_datablock_in_modifier", (drag->type != WM_DRAG_ASSET));
 }
 
 static void view3d_geometry_nodes_drop_copy(bContext *C, wmDrag *drag, wmDropBox *drop)

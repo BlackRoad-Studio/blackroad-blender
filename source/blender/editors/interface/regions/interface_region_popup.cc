@@ -35,6 +35,8 @@
 #include "interface_intern.hh"
 #include "interface_regions_intern.hh"
 
+using blender::StringRef;
+
 /* -------------------------------------------------------------------- */
 /** \name Utility Functions
  * \{ */
@@ -329,7 +331,7 @@ static void ui_popup_block_position(wmWindow *window,
 
     /* when you are outside parent button, safety there should be smaller */
 
-    const int s1 = 40 * UI_SCALE_FAC;
+    const int s1 = (U.flag & USER_MENU_CLOSE_LEAVE) ? 40 * UI_SCALE_FAC : win_size[0];
     const int s2 = 3 * UI_SCALE_FAC;
 
     /* parent button to left */
@@ -1123,7 +1125,11 @@ static uiBlock *ui_alert_create(bContext *C, ARegion *region, void *user_data)
   return block;
 }
 
-void UI_alert(bContext *C, std::string title, std::string message, eAlertIcon icon, bool compact)
+void UI_alert(bContext *C,
+              const StringRef title,
+              const StringRef message,
+              const eAlertIcon icon,
+              const bool compact)
 {
   uiAlertData *data = MEM_new<uiAlertData>(__func__);
   data->title = title;

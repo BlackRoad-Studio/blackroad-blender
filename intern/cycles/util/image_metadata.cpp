@@ -188,17 +188,17 @@ bool ImageMetaData::load_metadata(OIIO::string_view filepath, OIIO::ImageSpec *r
 {
   /* Perform preliminary checks, with meaningful logging. */
   if (!OIIO::Filesystem::exists(filepath)) {
-    LOG_WARNING << "File " << filepath << " does not exist.";
+    LOG_ERROR << "Image file " << filepath << " does not exist.";
     return false;
   }
   if (OIIO::Filesystem::is_directory(filepath)) {
-    LOG_WARNING << "File " << filepath << " is a directory, cannot use as image.";
+    LOG_ERROR << "Image file " << filepath << " is a directory, cannot use as image.";
     return false;
   }
 
   std::unique_ptr<ImageInput> in(ImageInput::create(filepath));
   if (!in) {
-    LOG_WARNING << "File " << filepath << " failed to open.";
+    LOG_ERROR << "Image file " << filepath << " failed to load.";
     return false;
   }
 
@@ -209,7 +209,7 @@ bool ImageMetaData::load_metadata(OIIO::string_view filepath, OIIO::ImageSpec *r
   config.attribute("oiio:UnassociatedAlpha", 1);
 
   if (!in->open(filepath, spec, config)) {
-    LOG_WARNING << "File " << filepath << " failed to open.";
+    LOG_ERROR << "Image file " << filepath << " failed to open.";
     return false;
   }
 

@@ -92,11 +92,11 @@ static void deform_verts(ModifierData *md,
   LatticeModifierData *lmd = (LatticeModifierData *)md;
 
   /* if next modifier needs original vertices */
-  MOD_previous_vcos_store(md, reinterpret_cast<const float(*)[3]>(positions.data()));
+  MOD_previous_vcos_store(md, reinterpret_cast<const float (*)[3]>(positions.data()));
 
   BKE_lattice_deform_coords_with_mesh(lmd->object,
                                       ctx->object,
-                                      reinterpret_cast<float(*)[3]>(positions.data()),
+                                      reinterpret_cast<float (*)[3]>(positions.data()),
                                       positions.size(),
                                       lmd->flag,
                                       lmd->name,
@@ -118,11 +118,11 @@ static void deform_verts_EM(ModifierData *md,
   LatticeModifierData *lmd = (LatticeModifierData *)md;
 
   /* if next modifier needs original vertices */
-  MOD_previous_vcos_store(md, reinterpret_cast<const float(*)[3]>(positions.data()));
+  MOD_previous_vcos_store(md, reinterpret_cast<const float (*)[3]>(positions.data()));
 
   BKE_lattice_deform_coords_with_editmesh(lmd->object,
                                           ctx->object,
-                                          reinterpret_cast<float(*)[3]>(positions.data()),
+                                          reinterpret_cast<float (*)[3]>(positions.data()),
                                           positions.size(),
                                           lmd->flag,
                                           lmd->name,
@@ -187,4 +187,5 @@ ModifierTypeInfo modifierType_Lattice = {
     /*blend_write*/ nullptr,
     /*blend_read*/ nullptr,
     /*foreach_cache*/ nullptr,
+    /*foreach_working_space_color*/ nullptr,
 };

@@ -123,6 +123,7 @@ bool VDBImageLoader::load_pixels_full(const ImageMetaData &metadata, uint8_t *pi
     return true;
   }
 #else
+  (void)metadata;
   (void)pixels;
 #endif
 

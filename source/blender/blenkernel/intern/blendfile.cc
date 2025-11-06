@@ -982,6 +982,9 @@ static void setup_app_data(bContext *C,
   reuse_data.old_bmain = bmain;
   reuse_data.wm_setup_data = wm_setup_data;
 
+  const bool reuse_editable_assets = mode != LOAD_UNDO && !params->is_factory_settings &&
+                                     reuse_editable_asset_needed(&reuse_data);
+
   if (mode != LOAD_UNDO) {
     const short ui_id_codes[]{ID_WS, ID_SCR};
 
@@ -1008,7 +1011,7 @@ static void setup_app_data(bContext *C,
 
     BKE_main_idmap_destroy(reuse_data.id_map);
 
-    if (!params->is_factory_settings && reuse_editable_asset_needed(&reuse_data)) {
+    if (reuse_editable_assets) {
       unpin_file_local_grease_pencil_brush_materials(&reuse_data);
       /* Keep linked brush asset data, similar to UI data. Only does a known
        * subset know. Could do everything, but that risks dragging along more
@@ -1229,9 +1232,11 @@ static void setup_app_data(bContext *C,
   /* Setting scene might require having a dependency graph, with copy-on-eval
    * we need to make sure we ensure scene has correct color management before
    * constructing dependency graph. */
-  if (mode != LOAD_UNDO) {
-    IMB_colormanagement_check_file_config(bmain);
+  if (params->is_startup) {
+    IMB_colormanagement_working_space_init_startup(bmain);
   }
+  IMB_colormanagement_working_space_check(bmain, mode == LOAD_UNDO, reuse_editable_assets);
+  IMB_colormanagement_check_file_config(bmain);
 
   BKE_scene_set_background(bmain, curscene);
 
@@ -1569,6 +1574,24 @@ UserDef *BKE_blendfile_userdef_from_defaults()
         userdef, "VIEW3D_AST_brush_sculpt", "Brushes/Mesh Sculpt/Simulation");
 
     BKE_preferences_asset_shelf_settings_ensure_catalog_path_enabled(
+        userdef, "IMAGE_AST_brush_paint", "Brushes/Mesh Texture Paint/Basic");
+    BKE_preferences_asset_shelf_settings_ensure_catalog_path_enabled(
+        userdef, "IMAGE_AST_brush_paint", "Brushes/Mesh Texture Paint/Erase");
+    BKE_preferences_asset_shelf_settings_ensure_catalog_path_enabled(
+        userdef, "IMAGE_AST_brush_paint", "Brushes/Mesh Texture Paint/Pixel Art");
+    BKE_preferences_asset_shelf_settings_ensure_catalog_path_enabled(
+        userdef, "IMAGE_AST_brush_paint", "Brushes/Mesh Texture Paint/Utilities");
+
+    BKE_preferences_asset_shelf_settings_ensure_catalog_path_enabled(
+        userdef, "VIEW3D_AST_brush_texture_paint", "Brushes/Mesh Texture Paint/Basic");
+    BKE_preferences_asset_shelf_settings_ensure_catalog_path_enabled(
+        userdef, "VIEW3D_AST_brush_texture_paint", "Brushes/Mesh Texture Paint/Erase");
+    BKE_preferences_asset_shelf_settings_ensure_catalog_path_enabled(
+        userdef, "VIEW3D_AST_brush_texture_paint", "Brushes/Mesh Texture Paint/Pixel Art");
+    BKE_preferences_asset_shelf_settings_ensure_catalog_path_enabled(
+        userdef, "VIEW3D_AST_brush_texture_paint", "Brushes/Mesh Texture Paint/Utilities");
+
+    BKE_preferences_asset_shelf_settings_ensure_catalog_path_enabled(
         userdef, "VIEW3D_AST_brush_gpencil_paint", "Brushes/Grease Pencil Draw/Draw");
     BKE_preferences_asset_shelf_settings_ensure_catalog_path_enabled(
         userdef, "VIEW3D_AST_brush_gpencil_paint", "Brushes/Grease Pencil Draw/Erase");
@@ -1736,12 +1759,13 @@ static CLG_LogRef LOG_PARTIALWRITE = {"blend.partial_write"};
 
 namespace blender::bke::blendfile {
 
-PartialWriteContext::PartialWriteContext(StringRefNull reference_root_filepath)
-    : reference_root_filepath_(reference_root_filepath)
+PartialWriteContext::PartialWriteContext(Main &reference_main)
+    : reference_root_filepath_(BKE_main_blendfile_path(&reference_main))
 {
   if (!reference_root_filepath_.empty()) {
     STRNCPY(this->bmain.filepath, reference_root_filepath_.c_str());
   }
+  this->bmain.colorspace = reference_main.colorspace;
   /* Only for IDs matching existing data in current G_MAIN. */
   matching_uid_map_ = BKE_main_idmap_create(&this->bmain, false, nullptr, MAIN_IDMAP_TYPE_UID);
   /* For all IDs existing in the context. */
@@ -1821,7 +1845,14 @@ ID *PartialWriteContext::id_add_copy(const ID *id, const bool regenerate_session
                           /* NOTE: Could make this an option if needed in the future */
                           LIB_ID_COPY_ASSET_METADATA);
   ctx_root_id = BKE_id_copy_in_lib(nullptr, id->lib, id, std::nullopt, nullptr, copy_flags);
+  if (!ctx_root_id) {
+    return ctx_root_id;
+  }
   ctx_root_id->tag |= ID_TAG_TEMP_MAIN;
+  /* It is critical to preserve the deep hash here, as the copy put in the partial write context is
+   * expected to be a perfect duplicate of the packed ID (including all of its dependencies). This
+   * will also be used on paste for deduplication. */
+  ctx_root_id->deep_hash = id->deep_hash;
   /* Ensure that the newly copied ID has a library in temp local bmain if it was linked.
    * While this could be optimized out in case the ID is made local in the context, this adds
    * complexity as default ID management code like 'make local' code will create invalid bmain
@@ -1872,12 +1903,40 @@ Library *PartialWriteContext::ensure_library(ID *ctx_id)
   if (!ID_IS_LINKED(ctx_id)) {
     return nullptr;
   }
-  blender::StringRefNull lib_path = ctx_id->lib->runtime->filepath_abs;
-  Library *ctx_lib = this->libraries_map_.lookup_default(lib_path, nullptr);
-  if (!ctx_lib) {
-    ctx_lib = reinterpret_cast<Library *>(id_add_copy(&ctx_id->lib->id, true));
-    this->libraries_map_.add(lib_path, ctx_lib);
+
+  Library *src_lib = ctx_id->lib;
+  const bool is_archive_lib = (src_lib->flag & LIBRARY_FLAG_IS_ARCHIVE) != 0;
+  Library *src_base_lib = is_archive_lib ? src_lib->archive_parent_library : src_lib;
+  BLI_assert(src_base_lib);
+  BLI_assert((is_archive_lib && src_lib != src_base_lib && !ctx_id->deep_hash.is_null()) ||
+             (!is_archive_lib && src_lib == src_base_lib && ctx_id->deep_hash.is_null()));
+
+  blender::StringRefNull lib_path = src_base_lib->runtime->filepath_abs;
+  Library *ctx_base_lib = this->libraries_map_.lookup_default(lib_path, nullptr);
+  if (!ctx_base_lib) {
+    ctx_base_lib = reinterpret_cast<Library *>(id_add_copy(&src_base_lib->id, true));
+    BLI_assert(ctx_base_lib);
+    this->libraries_map_.add(lib_path, ctx_base_lib);
   }
+  /* The mapping should only contain real libraries, never packed ones. */
+  BLI_assert(!ctx_base_lib || (ctx_base_lib->flag & LIBRARY_FLAG_IS_ARCHIVE) == 0);
+
+  /* There is a valid context base library, now find or create a valid archived library if needed.
+   */
+  Library *ctx_lib = ctx_base_lib;
+  if (is_archive_lib) {
+    /* Leave the creation of a new archive library to the Library code, when needed, instead of
+     * using the write context's own `id_add_copy` util. Both are doing different and complex
+     * things, but for archive libraries the Library code should be mostly usable 'as-is'. */
+    bool is_new = false;
+    ctx_lib = blender::bke::library::ensure_archive_library(
+        this->bmain, *ctx_id, *ctx_lib, ctx_id->deep_hash, is_new);
+    if (is_new) {
+      ctx_lib->id.tag |= ID_TAG_TEMP_MAIN;
+      BKE_main_idmap_insert_id(this->bmain.id_map, &ctx_lib->id);
+    }
+  }
+
   ctx_id->lib = ctx_lib;
   return ctx_lib;
 }
@@ -1918,6 +1977,9 @@ ID *PartialWriteContext::id_add(
   }
 
   /* The given ID may have already been added (either explicitly or as a dependency) before. */
+  /* NOTE: This should not be needed currently (as this is only used as temporary partial copy of
+   * the current main data-base, so ID's runtime `session_uid` should be enough), but in the
+   * future it might also be good to lookup by ID deep hash for packed data? */
   ID *ctx_root_id = BKE_main_idmap_lookup_uid(matching_uid_map_, id->session_uid);
   if (ctx_root_id) {
     /* If the root orig ID is already in the context, assume all of its dependencies are as well.
@@ -1938,6 +2000,13 @@ ID *PartialWriteContext::id_add(
   blender::Vector<std::pair<ID *, PartialWriteContext::IDAddOperations>> post_process_ids_todo;
 
   ctx_root_id = id_add_copy(id, false);
+  if (!ctx_root_id) {
+    CLOG_ERROR(&LOG_PARTIALWRITE,
+               "Failed to copy ID '%s', could not add it to the partial write context",
+               id->name);
+    return ctx_root_id;
+  }
+
   BLI_assert(ctx_root_id->session_uid == id->session_uid);
   local_ctx_id_map.add(id, ctx_root_id);
   post_process_ids_todo.append({ctx_root_id, options.operations});
@@ -1972,6 +2041,14 @@ ID *PartialWriteContext::id_add(
           cb_data, options);
       operations_final = ((operations_per_id & MASK_PER_ID_USAGE) |
                           (operations_final & ~MASK_PER_ID_USAGE));
+      if (ID_IS_PACKED(orig_deps_id) && (operations_final & MAKE_LOCAL) == 0) {
+        /* To ensure that their deep hash still matches with their 'context' copy, packed IDs that
+         * are not made local (i.e. 'unpacked'):
+         *  - Must also include all of their dependencies.
+         *  - Should never duplicate or clear their dependencies. */
+        operations_final |= ADD_DEPENDENCIES;
+        operations_final &= ~(DUPLICATE_DEPENDENCIES | CLEAR_DEPENDENCIES);
+      }
     }
 
     const bool add_dependencies = (operations_final & ADD_DEPENDENCIES) != 0;
@@ -2021,6 +2098,15 @@ ID *PartialWriteContext::id_add(
       }
       ctx_deps_id = this->id_add_copy(orig_deps_id, duplicate_dependencies);
       local_ctx_id_map.add(orig_deps_id, ctx_deps_id);
+      if (!ctx_deps_id) {
+        CLOG_ERROR(&LOG_PARTIALWRITE,
+                   "Failed to copy ID '%s' (used by ID '%s'), could not add it to the partial "
+                   "write context",
+                   (*id_ptr)->name,
+                   cb_data->owner_id->name);
+        *id_ptr = nullptr;
+        return IDWALK_RET_NOP;
+      }
       ids_to_process.add(ctx_deps_id);
       post_process_ids_todo.append({ctx_deps_id, operations_final});
     }

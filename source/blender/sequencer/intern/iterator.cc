@@ -39,8 +39,7 @@ static bool strip_for_each_recursive(ListBase *seqbase, ForEachFunc callback, vo
   return true;
 }
 
-static bool strip_for_each_recursive(ListBase *seqbase,
-                                     blender::FunctionRef<bool(Strip *)> callback)
+static bool strip_for_each_recursive(ListBase *seqbase, FunctionRef<bool(Strip *)> callback)
 {
   LISTBASE_FOREACH (Strip *, strip, seqbase) {
     if (!callback(strip)) {
@@ -56,12 +55,12 @@ static bool strip_for_each_recursive(ListBase *seqbase,
   return true;
 }
 
-void for_each_callback(ListBase *seqbase, ForEachFunc callback, void *user_data)
+void foreach_strip(ListBase *seqbase, ForEachFunc callback, void *user_data)
 {
   strip_for_each_recursive(seqbase, callback, user_data);
 }
 
-void for_each_callback(ListBase *seqbase, blender::FunctionRef<bool(Strip *)> callback)
+void foreach_strip(ListBase *seqbase, FunctionRef<bool(Strip *)> callback)
 {
   strip_for_each_recursive(seqbase, callback);
 }
@@ -181,18 +180,16 @@ static void collection_filter_channel_up_to_incl(VectorSet<Strip *> &strips, con
 
 /* Check if strip must be rendered. This depends on whole stack in some cases, not only strip
  * itself. Order of applying these conditions is important. */
-static bool must_render_strip(const VectorSet<Strip *> &strips, Strip *strip)
+bool must_render_strip(const VectorSet<Strip *> &strips, Strip *strip)
 {
   bool strip_have_effect_in_stack = false;
   for (Strip *strip_iter : strips) {
     /* Strips is below another strip with replace blending are not rendered. */
-    if (strip_iter->blend_mode == SEQ_BLEND_REPLACE && strip->channel < strip_iter->channel) {
+    if (strip_iter->blend_mode == STRIP_BLEND_REPLACE && strip->channel < strip_iter->channel) {
       return false;
     }
 
-    if ((strip_iter->type & STRIP_TYPE_EFFECT) != 0 &&
-        relation_is_effect_of_strip(strip_iter, strip))
-    {
+    if (strip_iter->is_effect() && relation_is_effect_of_strip(strip_iter, strip)) {
       /* Strips in same channel or higher than its effect are rendered. */
       if (strip->channel >= strip_iter->channel) {
         return true;
@@ -203,7 +200,7 @@ static bool must_render_strip(const VectorSet<Strip *> &strips, Strip *strip)
   }
 
   /* All non-generator effects are rendered (with respect to conditions above). */
-  if ((strip->type & STRIP_TYPE_EFFECT) != 0 && effect_get_num_inputs(strip->type) != 0) {
+  if (strip->is_effect() && effect_get_num_inputs(strip->type) != 0) {
     return true;
   }
 
@@ -265,7 +262,7 @@ void query_strip_effect_chain(const Scene *scene,
   r_strips.add(reference_strip);
 
   /* Find all input strips for `reference_strip`. */
-  if (reference_strip->type & STRIP_TYPE_EFFECT) {
+  if (reference_strip->is_effect()) {
     if (reference_strip->input1) {
       query_strip_effect_chain(scene, reference_strip->input1, seqbase, r_strips);
     }
@@ -288,7 +285,7 @@ void query_strip_connected_and_effect_chain(const Scene *scene,
                                             VectorSet<Strip *> &r_strips)
 {
 
-  blender::Vector<Strip *> pending;
+  Vector<Strip *> pending;
   pending.append(reference_strip);
 
   while (!pending.is_empty()) {

@@ -404,6 +404,7 @@ GHOST_WindowCocoa::GHOST_WindowCocoa(GHOST_SystemCocoa *systemCocoa,
 
         /* For Blender to know if this window supports HDR. */
         hdr_info_.hdr_enabled = true;
+        hdr_info_.wide_gamut_enabled = true;
         hdr_info_.sdr_white_level = 1.0f;
       }
 
@@ -555,7 +556,7 @@ std::string GHOST_WindowCocoa::getTitle() const
   return title;
 }
 
-GHOST_TSuccess GHOST_WindowCocoa::setPath(const char *filepath)
+void GHOST_WindowCocoa::setPath(const char *filepath)
 {
   GHOST_ASSERT(getValid(), "GHOST_WindowCocoa::setAssociatedFile(): window invalid");
 
@@ -566,8 +567,6 @@ GHOST_TSuccess GHOST_WindowCocoa::setPath(const char *filepath)
 
     window_.representedFilename = associatedFileName;
   }
-
-  return GHOST_kSuccess;
 }
 
 GHOST_TSuccess GHOST_WindowCocoa::applyWindowDecorationStyle()

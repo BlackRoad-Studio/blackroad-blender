@@ -20,7 +20,6 @@
 #include "DNA_session_uid_types.h" /* for #SessionUID */
 #include "DNA_vec_types.h"         /* for #rctf */
 
-struct Ipo;
 struct MovieClip;
 struct Scene;
 struct VFont;
@@ -210,9 +209,6 @@ typedef struct Strip {
 
   StripData *data;
 
-  /** Old animation system, deprecated for 2.5. */
-  struct Ipo *ipo_legacy DNA_DEPRECATED;
-
   /** These ID vars should never be NULL but can be when linked libraries fail to load,
    * so check on access. */
   /* For SCENE strips. */
@@ -267,7 +263,7 @@ typedef struct Strip {
   /** Frame offset from start/end of video file content to be ignored and invisible to the VSE. */
   int anim_startofs, anim_endofs;
 
-  int blend_mode; /* StripType, but may be SEQ_BLEND_REPLACE */
+  int blend_mode; /* StripBlendMode */
   float blend_opacity;
 
   int8_t color_tag; /* StripColorTag */
@@ -300,7 +296,13 @@ typedef struct Strip {
   int retiming_keys_num;
   char _pad6[4];
 
+  void *_pad10;
+
   StripRuntime runtime;
+
+#ifdef __cplusplus
+  bool is_effect() const;
+#endif
 } Strip;
 
 typedef struct MetaStack {
@@ -410,7 +412,8 @@ typedef struct GlowVars {
   int bNoComp;
 } GlowVars;
 
-typedef struct TransformVars {
+/* Removed in 5.0. Only used in versioning and blend reading. */
+typedef struct TransformVarsLegacy {
   float ScalexIni;
   float ScaleyIni;
   float xIni;
@@ -420,7 +423,7 @@ typedef struct TransformVars {
   int interpolation;
   /** Preserve aspect/ratio when scaling. */
   int uniform_scale;
-} TransformVars;
+} TransformVarsLegacy;
 
 typedef struct SolidColorVars {
   float col[3];
@@ -522,8 +525,7 @@ typedef enum eEffectTextAlignY {
 #define STRIP_FONT_NOT_LOADED -2
 
 typedef struct ColorMixVars {
-  /** Value from STRIP_TYPE_XXX enumeration. */
-  int blend_effect;
+  int blend_effect; /* StripBlendMode */
   /** Blend factor [0.0f, 1.0f]. */
   float factor;
 } ColorMixVars;
@@ -564,7 +566,7 @@ typedef struct StripModifierData {
    * Bits that can be used for open-states of layout panels in the modifier.
    */
   uint16_t layout_panel_open_flag;
-  char _pad[2];
+  uint16_t ui_expand_flag;
 
   StripModifierDataRuntime runtime;
 } StripModifierData;
@@ -623,6 +625,11 @@ typedef enum eModTonemapType {
   SEQ_TONEMAP_RH_SIMPLE = 0,
   SEQ_TONEMAP_RD_PHOTORECEPTOR = 1,
 } eModTonemapType;
+
+typedef struct SequencerCompositorModifierData {
+  StripModifierData modifier;
+  struct bNodeTree *node_group;
+} SequencerCompositorModifierData;
 
 /** \} */
 
@@ -741,7 +748,7 @@ typedef enum eStripFlag {
   /* Access scene strips directly (like a meta-strip). */
   SEQ_SCENE_STRIPS = (1 << 30),
 
-  SEQ_UNUSED_31 = (1u << 31),
+  SEQ_AUDIO_PITCH_CORRECTION = (1u << 31)
 } eStripFlag;
 
 /** #StripProxy.storage */
@@ -795,7 +802,7 @@ typedef enum eStripAlphaMode {
 /**
  * #Strip.type
  *
- * \warning #STRIP_TYPE_EFFECT BIT is used to determine if this is an effect strip!
+ * Note: update #Strip::is_effect when adding new effect types.
  */
 typedef enum StripType {
   STRIP_TYPE_IMAGE = 0,
@@ -807,7 +814,6 @@ typedef enum StripType {
   STRIP_TYPE_MOVIECLIP = 6,
   STRIP_TYPE_MASK = 7,
 
-  STRIP_TYPE_EFFECT = 8,
   STRIP_TYPE_CROSS = 8,
   STRIP_TYPE_ADD = 9,
   STRIP_TYPE_SUB = 10,
@@ -815,12 +821,13 @@ typedef enum StripType {
   STRIP_TYPE_ALPHAUNDER = 12,
   STRIP_TYPE_GAMCROSS = 13,
   STRIP_TYPE_MUL = 14,
-  STRIP_TYPE_OVERDROP_REMOVED =
-      15, /* Removed (behavior was the same as alpha-over), only used when reading old files. */
-  /* STRIP_TYPE_PLUGIN      = 24, */ /* Deprecated */
+  /* Removed (behavior was the same as alpha-over), only used when reading old files. */
+  STRIP_TYPE_OVERDROP_REMOVED = 15,
+  /* STRIP_TYPE_PLUGIN = 24, */ /* Removed. */
   STRIP_TYPE_WIPE = 25,
   STRIP_TYPE_GLOW = 26,
-  STRIP_TYPE_TRANSFORM = 27,
+  /* Removed in 5.0, used only for versioning. */
+  STRIP_TYPE_TRANSFORM_LEGACY = 27,
   STRIP_TYPE_COLOR = 28,
   STRIP_TYPE_SPEED = 29,
   STRIP_TYPE_MULTICAM = 30,
@@ -828,28 +835,6 @@ typedef enum StripType {
   STRIP_TYPE_GAUSSIAN_BLUR = 40,
   STRIP_TYPE_TEXT = 41,
   STRIP_TYPE_COLORMIX = 42,
-
-  /* Blend modes */
-  STRIP_TYPE_SCREEN = 43,
-  STRIP_TYPE_LIGHTEN = 44,
-  STRIP_TYPE_DODGE = 45,
-  STRIP_TYPE_DARKEN = 46,
-  STRIP_TYPE_COLOR_BURN = 47,
-  STRIP_TYPE_LINEAR_BURN = 48,
-  STRIP_TYPE_OVERLAY = 49,
-  STRIP_TYPE_HARD_LIGHT = 50,
-  STRIP_TYPE_SOFT_LIGHT = 51,
-  STRIP_TYPE_PIN_LIGHT = 52,
-  STRIP_TYPE_LIN_LIGHT = 53,
-  STRIP_TYPE_VIVID_LIGHT = 54,
-  STRIP_TYPE_HUE = 55,
-  STRIP_TYPE_SATURATION = 56,
-  STRIP_TYPE_VALUE = 57,
-  STRIP_TYPE_BLEND_COLOR = 58,
-  STRIP_TYPE_DIFFERENCE = 59,
-  STRIP_TYPE_EXCLUSION = 60,
-
-  STRIP_TYPE_MAX = 60,
 } StripType;
 
 typedef enum eStripMovieClipFlag {
@@ -857,13 +842,38 @@ typedef enum eStripMovieClipFlag {
   SEQ_MOVIECLIP_RENDER_STABILIZED = 1 << 1,
 } eStripMovieClipFlag;
 
-enum {
-  SEQ_BLEND_REPLACE = 0,
-  /* All other BLEND_MODEs are simple STRIP_TYPE_EFFECT ids and therefore identical
-   * to the table above. (Only those effects that handle _exactly_ two inputs,
-   * otherwise, you can't really blend, right :) !)
-   */
-};
+typedef enum StripBlendMode {
+  STRIP_BLEND_REPLACE = 0,
+
+  STRIP_BLEND_CROSS = 8,
+  STRIP_BLEND_ADD = 9,
+  STRIP_BLEND_SUB = 10,
+  STRIP_BLEND_ALPHAOVER = 11,
+  STRIP_BLEND_ALPHAUNDER = 12,
+  STRIP_BLEND_GAMCROSS = 13,
+  STRIP_BLEND_MUL = 14,
+  /* Removed (behavior was the same as alpha-over), only used when reading old files. */
+  STRIP_BLEND_OVERDROP_REMOVED = 15,
+
+  STRIP_BLEND_SCREEN = 43,
+  STRIP_BLEND_LIGHTEN = 44,
+  STRIP_BLEND_DODGE = 45,
+  STRIP_BLEND_DARKEN = 46,
+  STRIP_BLEND_COLOR_BURN = 47,
+  STRIP_BLEND_LINEAR_BURN = 48,
+  STRIP_BLEND_OVERLAY = 49,
+  STRIP_BLEND_HARD_LIGHT = 50,
+  STRIP_BLEND_SOFT_LIGHT = 51,
+  STRIP_BLEND_PIN_LIGHT = 52,
+  STRIP_BLEND_LIN_LIGHT = 53,
+  STRIP_BLEND_VIVID_LIGHT = 54,
+  STRIP_BLEND_HUE = 55,
+  STRIP_BLEND_SATURATION = 56,
+  STRIP_BLEND_VALUE = 57,
+  STRIP_BLEND_BLEND_COLOR = 58,
+  STRIP_BLEND_DIFFERENCE = 59,
+  STRIP_BLEND_EXCLUSION = 60,
+} StripBlendMode;
 
 #define STRIP_HAS_PATH(_strip) \
   (ELEM((_strip)->type, \
@@ -885,6 +895,7 @@ typedef enum eStripModifierType {
   eSeqModifierType_WhiteBalance = 6,
   eSeqModifierType_Tonemap = 7,
   eSeqModifierType_SoundEqualizer = 8,
+  eSeqModifierType_Compositor = 9,
   /* Keep last. */
   NUM_STRIP_MODIFIER_TYPES,
 } eStripModifierType;

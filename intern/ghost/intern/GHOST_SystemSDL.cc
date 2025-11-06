@@ -801,12 +801,16 @@ GHOST_TCapabilityFlag GHOST_SystemSDL::getCapabilities() const
           GHOST_kCapabilityInputIME |
           /* No support for window decoration styles. */
           GHOST_kCapabilityWindowDecorationStyles |
+          /* No support for precisely placing windows on multiple monitors. */
+          GHOST_kCapabilityMultiMonitorPlacement |
           /* No support for a Hyper modifier key. */
           GHOST_kCapabilityKeyboardHyperKey |
           /* No support yet for RGBA mouse cursors. */
           GHOST_kCapabilityCursorRGBA |
           /* No support yet for dynamic cursor generation. */
-          GHOST_kCapabilityCursorGenerator));
+          GHOST_kCapabilityCursorGenerator |
+          /* No support for window path meta-data. */
+          GHOST_kCapabilityWindowPath));
 }
 
 char *GHOST_SystemSDL::getClipboard(bool /*selection*/) const

@@ -243,7 +243,6 @@ class BlenderSync {
 
   Scene *scene;
   bool preview;
-  bool use_experimental_procedural = false;
   bool use_adaptive_subdivision = false;
   bool use_developer_ui;
 

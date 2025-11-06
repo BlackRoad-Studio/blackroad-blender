@@ -35,6 +35,7 @@
 
 #include "BLI_array_utils.hh"
 #include "BLI_bounds.hh"
+#include "BLI_color_types.hh"
 #include "BLI_enumerable_thread_specific.hh"
 #include "BLI_listbase.h"
 #include "BLI_map.hh"
@@ -275,6 +276,21 @@ static void grease_pencil_foreach_id(ID *id, LibraryForeachIDData *data)
   }
 }
 
+static void grease_pencil_foreach_working_space_color(ID *id,
+                                                      const IDTypeForeachColorFunctionCallback &fn)
+{
+  GreasePencil *grease_pencil = reinterpret_cast<GreasePencil *>(id);
+
+  fn.single(grease_pencil->onion_skinning_settings.color_after);
+  fn.single(grease_pencil->onion_skinning_settings.color_before);
+
+  for (blender::bke::greasepencil::TreeNode *node : grease_pencil->nodes_for_write()) {
+    fn.single(node->color);
+  }
+
+  grease_pencil->attribute_storage.wrap().foreach_working_space_color(fn);
+}
+
 static void grease_pencil_blend_write(BlendWriter *writer, ID *id, const void *id_address)
 {
   using namespace blender;
@@ -342,7 +358,7 @@ IDTypeInfo IDType_ID_GP = {
     /*main_listbase_index*/ INDEX_ID_GP,
     /*struct_size*/ sizeof(GreasePencil),
     /*name*/ "GreasePencil",
-    /*name_plural*/ N_("grease_pencils_v3"),
+    /*name_plural*/ N_("grease_pencils"),
     /*translation_context*/ BLT_I18NCONTEXT_ID_GPENCIL,
     /*flags*/ IDTYPE_FLAGS_APPEND_IS_REUSABLE,
     /*asset_type_info*/ nullptr,
@@ -354,6 +370,7 @@ IDTypeInfo IDType_ID_GP = {
     /*foreach_id*/ grease_pencil_foreach_id,
     /*foreach_cache*/ nullptr,
     /*foreach_path*/ nullptr,
+    /*foreach_working_space_color*/ grease_pencil_foreach_working_space_color,
     /*owner_pointer_get*/ nullptr,
 
     /*blend_write*/ grease_pencil_blend_write,
@@ -366,7 +383,6 @@ IDTypeInfo IDType_ID_GP = {
 };
 
 namespace blender::bke::greasepencil {
-
 constexpr StringRef ATTR_RADIUS = "radius";
 constexpr StringRef ATTR_OPACITY = "opacity";
 constexpr StringRef ATTR_VERTEX_COLOR = "vertex_color";
@@ -483,7 +499,7 @@ static void update_triangle_cache(const Span<float3> positions,
       }
       MutableSpan<int3> r_tris = triangles.slice(triangle_offsets[curve_i]);
 
-      float(*projverts)[2] = static_cast<float(*)[2]>(
+      float (*projverts)[2] = static_cast<float (*)[2]>(
           BLI_memarena_alloc(pf_arena, sizeof(*projverts) * size_t(points.size())));
 
       float3x3 axis_mat;
@@ -494,7 +510,7 @@ static void update_triangle_cache(const Span<float3> positions,
       }
 
       BLI_polyfill_calc_arena(
-          projverts, points.size(), 0, reinterpret_cast<uint32_t(*)[3]>(r_tris.data()), pf_arena);
+          projverts, points.size(), 0, reinterpret_cast<uint32_t (*)[3]>(r_tris.data()), pf_arena);
       BLI_memarena_clear(pf_arena);
     }
   });
@@ -4399,6 +4415,9 @@ static void write_drawing_array(GreasePencil &grease_pencil,
         bke::CurvesGeometry::BlendWriteData write_data(scope);
         curves.blend_write_prepare(write_data);
         drawing_copy.runtime = nullptr;
+
+        BLO_write_shared_tag(writer, curves.curve_offsets);
+        BLO_write_shared_tag(writer, curves.custom_knots);
 
         BLO_write_struct_at_address(writer, GreasePencilDrawing, drawing_base, &drawing_copy);
         curves.blend_write(*writer, grease_pencil.id, write_data);

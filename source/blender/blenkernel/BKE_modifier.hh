@@ -7,6 +7,7 @@
  * \ingroup bke
  */
 #include "BLI_compiler_attrs.h"
+#include "BLI_enum_flags.hh"
 #include "BLI_function_ref.hh"
 #include "BLI_math_matrix_types.hh"
 #include "BLI_span.hh"
@@ -29,6 +30,7 @@ struct CustomData_MeshMasks;
 struct DepsNodeHandle;
 struct Depsgraph;
 struct ID;
+struct IDTypeForeachColorFunctionCallback;
 struct ListBase;
 struct Main;
 struct Mesh;
@@ -128,7 +130,7 @@ enum ModifierTypeFlag {
   /** Accepts #GreasePencil data input. */
   eModifierTypeFlag_AcceptsGreasePencil = (1 << 12),
 };
-ENUM_OPERATORS(ModifierTypeFlag, eModifierTypeFlag_AcceptsGreasePencil)
+ENUM_OPERATORS(ModifierTypeFlag)
 
 using IDWalkFunc = void (*)(void *user_data,
                             Object *ob,
@@ -163,7 +165,7 @@ enum ModifierApplyFlag {
    */
   MOD_APPLY_TO_ORIGINAL = 1 << 4,
 };
-ENUM_OPERATORS(ModifierApplyFlag, MOD_APPLY_TO_ORIGINAL);
+ENUM_OPERATORS(ModifierApplyFlag);
 
 struct ModifierUpdateDepsgraphContext {
   Scene *scene;
@@ -410,6 +412,12 @@ struct ModifierTypeInfo {
       Object *object,
       ModifierData *md,
       blender::FunctionRef<void(const IDCacheKey &cache_key, void **cache_p, uint flags)> fn);
+
+  /**
+   * Iterate over all working space colors.
+   */
+  void (*foreach_working_space_color)(ModifierData *md,
+                                      const IDTypeForeachColorFunctionCallback &fn);
 };
 
 /** Used to set a modifier's panel type. */

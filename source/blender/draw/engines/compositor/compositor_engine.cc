@@ -110,7 +110,7 @@ class Context : public compositor::Context {
         .value_or(Bounds<int2>(int2(0)));
   }
 
-  compositor::Result get_output() override
+  compositor::Result get_output(compositor::Domain /*domain*/) override
   {
     compositor::Result result = this->create_result(compositor::ResultType::Color,
                                                     compositor::ResultPrecision::Half);
@@ -128,17 +128,20 @@ class Context : public compositor::Context {
     return result;
   }
 
-  compositor::Result get_input(const Scene *scene, int view_layer, const char *name) override
+  compositor::Result get_pass(const Scene *scene, int view_layer_index, const char *name) override
   {
     /* Blender aliases the Image pass name to be the Combined pass, so we return the combined pass
      * in that case. */
     const char *pass_name = StringRef(name) == "Image" ? "Combined" : name;
 
-    if (DEG_get_original(scene) != DEG_get_original(scene_)) {
+    const Scene *original_scene = DEG_get_original(scene_);
+    if (DEG_get_original(scene) != original_scene) {
       return compositor::Result(*this);
     }
 
-    if (view_layer != 0) {
+    ViewLayer *view_layer = static_cast<ViewLayer *>(
+        BLI_findlink(&original_scene->view_layers, view_layer_index));
+    if (StringRef(view_layer->name) != DRW_context_get()->view_layer->name) {
       return compositor::Result(*this);
     }
 
@@ -160,6 +163,15 @@ class Context : public compositor::Context {
     }
 
     return compositor::Result(*this);
+  }
+
+  compositor::Result get_input(StringRef name) override
+  {
+    if (name == "Image") {
+      return this->get_pass(&this->get_scene(), 0, name.data());
+    }
+
+    return this->create_result(compositor::ResultType::Color);
   }
 
   StringRef get_view_name() const override
@@ -200,11 +212,11 @@ class Instance : public DrawEngine {
     return "Compositor";
   }
 
-  void init() final{};
-  void begin_sync() final{};
+  void init() final {};
+  void begin_sync() final {};
   void object_sync(blender::draw::ObjectRef & /*ob_ref*/,
-                   blender::draw::Manager & /*manager*/) final{};
-  void end_sync() final{};
+                   blender::draw::Manager & /*manager*/) final {};
+  void end_sync() final {};
 
   void draw(Manager & /*manager*/) final
   {

@@ -18,7 +18,7 @@ static void node_declare(NodeDeclarationBuilder &b)
 {
   b.add_input<decl::Geometry>("Grease Pencil")
       .supported_type(bke::GeometryComponent::Type::GreasePencil)
-      .description("Grease pencil data to convert to curves");
+      .description("Grease Pencil data to convert to curves");
   b.add_input<decl::Bool>("Selection")
       .default_value(true)
       .hide_value()
@@ -135,7 +135,7 @@ static void node_geo_exec(GeoNodeExecParams params)
     geometry::RealizeInstancesOptions options;
     const NodeAttributeFilter attribute_filter = params.get_attribute_filter("Curves");
     options.attribute_filter = attribute_filter;
-    curves_geometry = geometry::realize_instances(curves_geometry, options);
+    curves_geometry = geometry::realize_instances(curves_geometry, options).geometry;
   }
 
   params.set_output("Curves", std::move(curves_geometry));

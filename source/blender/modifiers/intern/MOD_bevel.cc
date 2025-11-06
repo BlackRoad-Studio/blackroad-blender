@@ -18,6 +18,7 @@
 #include "DNA_object_types.h"
 #include "DNA_screen_types.h"
 
+#include "BKE_attribute.h"
 #include "BKE_attribute.hh"
 #include "BKE_curveprofile.h"
 #include "BKE_deform.hh"
@@ -482,4 +483,5 @@ ModifierTypeInfo modifierType_Bevel = {
     /*blend_write*/ blend_write,
     /*blend_read*/ blend_read,
     /*foreach_cache*/ nullptr,
+    /*foreach_working_space_color*/ nullptr,
 };

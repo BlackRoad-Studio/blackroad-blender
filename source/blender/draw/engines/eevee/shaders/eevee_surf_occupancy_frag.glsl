@@ -30,22 +30,15 @@
  *
  */
 
-#include "infos/eevee_material_info.hh"
+#include "infos/eevee_geom_infos.hh"
+#include "infos/eevee_surf_volume_infos.hh"
 
 FRAGMENT_SHADER_CREATE_INFO(eevee_geom_mesh)
 FRAGMENT_SHADER_CREATE_INFO(eevee_surf_occupancy)
 
-#include "eevee_nodetree_lib.glsl"
 #include "eevee_occupancy_lib.glsl"
 #include "eevee_sampling_lib.glsl"
-#include "eevee_surf_lib.glsl"
-#include "eevee_velocity_lib.glsl"
 #include "eevee_volume_lib.glsl"
-
-float4 closure_to_rgba(Closure cl)
-{
-  return float4(0.0f);
-}
 
 void main()
 {

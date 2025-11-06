@@ -127,7 +127,7 @@ static void deform_verts(ModifierData *md,
   }
 
   /* if next modifier needs original vertices */
-  MOD_previous_vcos_store(md, reinterpret_cast<float(*)[3]>(positions.data()));
+  MOD_previous_vcos_store(md, reinterpret_cast<float (*)[3]>(positions.data()));
 
   BKE_armature_deform_coords_with_mesh(*amd->object,
                                        *ctx->object,
@@ -161,7 +161,7 @@ static void deform_verts_EM(ModifierData *md,
   }
 
   /* if next modifier needs original vertices */
-  MOD_previous_vcos_store(md, reinterpret_cast<float(*)[3]>(positions.data()));
+  MOD_previous_vcos_store(md, reinterpret_cast<float (*)[3]>(positions.data()));
 
   BKE_armature_deform_coords_with_editmesh(*amd->object,
                                            *ctx->object,
@@ -281,4 +281,5 @@ ModifierTypeInfo modifierType_Armature = {
     /*blend_write*/ nullptr,
     /*blend_read*/ blend_read,
     /*foreach_cache*/ nullptr,
+    /*foreach_working_space_color*/ nullptr,
 };

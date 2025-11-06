@@ -16,6 +16,7 @@
 #include "MEM_guardedalloc.h"
 
 #include "BLI_listbase.h"
+#include "BLI_math_base.h"
 #include "BLI_path_utils.hh"
 #include "BLI_string.h"
 #include "BLI_string_utf8.h"
@@ -224,7 +225,7 @@ static void sequencer_generic_invoke_path__internal(bContext *C,
       Main *bmain = CTX_data_main(C);
       char dirpath[FILE_MAX];
       STRNCPY(dirpath, last_strip->data->dirpath);
-      BLI_path_abs(dirpath, BKE_main_blendfile_path(bmain));
+      BLI_path_abs(dirpath, ID_BLEND_PATH(bmain, &scene->id));
       RNA_string_set(op->ptr, identifier, dirpath);
     }
   }
@@ -342,13 +343,21 @@ static void sequencer_file_drop_channel_frame_set(bContext *C,
   RNA_int_set(op->ptr, "frame_start", int(frame_start));
 }
 
-static bool op_invoked_by_drop_event(wmOperator *op)
+static bool op_invoked_by_drop_event(const wmOperator *op)
 {
   SequencerAddData *sad = reinterpret_cast<SequencerAddData *>(op->customdata);
   if (sad == nullptr) {
     return false;
   }
   return sad->is_drop_event;
+}
+
+static bool can_move_strips(const wmOperator *op)
+{
+  PropertyRNA *prop = RNA_struct_find_property(op->ptr, "move_strips");
+
+  return prop != nullptr && RNA_property_boolean_get(op->ptr, prop) &&
+         (op->flag & OP_IS_REPEAT) == 0 && !op_invoked_by_drop_event(op);
 }
 
 static void sequencer_generic_invoke_xy__internal(
@@ -385,9 +394,7 @@ static void sequencer_generic_invoke_xy__internal(
 
 static void move_strips(bContext *C, wmOperator *op)
 {
-  if (!RNA_boolean_get(op->ptr, "move_strips") || op_invoked_by_drop_event(op) ||
-      (op->flag & OP_IS_REPEAT) != 0)
-  {
+  if (!can_move_strips(op)) {
     return;
   }
 
@@ -507,9 +514,7 @@ static bool load_data_init_from_operator(seq::LoadData *load_data, bContext *C, 
   }
 
   /* Override strip position by current mouse position. */
-  if ((prop = RNA_struct_find_property(op->ptr, "move_strips")) &&
-      RNA_property_boolean_get(op->ptr, prop) && (op->flag & OP_IS_REPEAT) == 0)
-  {
+  if (can_move_strips(op) && region != nullptr) {
     const wmWindow *win = CTX_wm_window(C);
     int2 mouse_region(win->eventstate->xy[0] - region->winrct.xmin,
                       win->eventstate->xy[1] - region->winrct.ymin);
@@ -553,8 +558,7 @@ static void seq_load_apply_generic_options(bContext *C, wmOperator *op, Strip *s
   }
 
   if (RNA_boolean_get(op->ptr, "overlap") == true ||
-      !seq::transform_test_overlap(scene, ed->current_strips(), strip) ||
-      RNA_boolean_get(op->ptr, "move_strips"))
+      !seq::transform_test_overlap(scene, ed->current_strips(), strip))
   {
     /* No overlap should be handled or the strip is not overlapping, exit early. */
     return;
@@ -562,7 +566,7 @@ static void seq_load_apply_generic_options(bContext *C, wmOperator *op, Strip *s
 
   if (RNA_boolean_get(op->ptr, "overlap_shuffle_override")) {
     /* Use set overlap_mode to fix overlaps. */
-    blender::VectorSet<Strip *> strip_col;
+    VectorSet<Strip *> strip_col;
     strip_col.add(strip);
 
     ScrArea *area = CTX_wm_area(C);
@@ -789,13 +793,23 @@ void SEQUENCER_OT_scene_strip_add_new(wmOperatorType *ot)
 /** \name Add Scene Strip From Scene Asset
  * \{ */
 
+/**
+ * Make sure the scene is always unique and ready to edit.
+ * If it was local it should be duplicated. If external it should be appended.
+ */
 static Scene *sequencer_add_scene_asset(const bContext &C,
                                         const asset_system::AssetRepresentation &asset,
                                         ReportList & /*reports*/)
 {
   Main &bmain = *CTX_data_main(&C);
   Scene *scene_asset = reinterpret_cast<Scene *>(
-      asset::asset_local_id_ensure_imported(bmain, asset));
+      asset::asset_local_id_ensure_imported(bmain, asset, ASSET_IMPORT_APPEND));
+
+  if (asset.is_local_id()) {
+    /* Local scene that needs to be duplicated. */
+    Scene *scene_copy = BKE_scene_duplicate(&bmain, scene_asset, SCE_COPY_FULL);
+    return scene_copy;
+  }
   return scene_asset;
 }
 
@@ -1073,7 +1087,7 @@ static IMB_Proxy_Size seq_get_proxy_size_flags(bContext *C)
   return proxy_sizes;
 }
 
-static void seq_build_proxy(bContext *C, blender::Span<Strip *> movie_strips)
+static void seq_build_proxy(bContext *C, Span<Strip *> movie_strips)
 {
   if (U.sequencer_proxy_setup != USER_SEQ_PROXY_SETUP_AUTOMATIC) {
     return;
@@ -1123,7 +1137,7 @@ static void sequencer_add_movie_sync_sound_strip(
 static void sequencer_add_movie_multiple_strips(bContext *C,
                                                 wmOperator *op,
                                                 seq::LoadData *load_data,
-                                                blender::VectorSet<Strip *> &r_movie_strips)
+                                                VectorSet<Strip *> &r_movie_strips)
 {
   Main *bmain = CTX_data_main(C);
   Scene *scene = CTX_data_sequencer_scene(C);
@@ -1131,7 +1145,7 @@ static void sequencer_add_movie_multiple_strips(bContext *C,
   bool overlap_shuffle_override = RNA_boolean_get(op->ptr, "overlap") == false &&
                                   RNA_boolean_get(op->ptr, "overlap_shuffle_override");
   bool has_seq_overlap = false;
-  blender::Vector<Strip *> added_strips;
+  Vector<Strip *> added_strips;
 
   RNA_BEGIN (op->ptr, itemptr, "files") {
     char dir_only[FILE_MAX];
@@ -1196,7 +1210,7 @@ static void sequencer_add_movie_multiple_strips(bContext *C,
 static bool sequencer_add_movie_single_strip(bContext *C,
                                              wmOperator *op,
                                              seq::LoadData *load_data,
-                                             blender::VectorSet<Strip *> &r_movie_strips)
+                                             VectorSet<Strip *> &r_movie_strips)
 {
   Main *bmain = CTX_data_main(C);
   Scene *scene = CTX_data_sequencer_scene(C);
@@ -1204,7 +1218,7 @@ static bool sequencer_add_movie_single_strip(bContext *C,
 
   Strip *strip_movie = nullptr;
   Strip *strip_sound = nullptr;
-  blender::Vector<Strip *> added_strips;
+  Vector<Strip *> added_strips;
 
   strip_movie = seq::add_movie_strip(bmain, scene, ed->current_strips(), load_data);
 
@@ -1283,7 +1297,7 @@ static wmOperatorStatus sequencer_add_movie_strip_exec(bContext *C, wmOperator *
     deselect_all_strips(scene);
   }
 
-  blender::VectorSet<Strip *> movie_strips;
+  VectorSet<Strip *> movie_strips;
   const int tot_files = RNA_property_collection_length(op->ptr,
                                                        RNA_struct_find_property(op->ptr, "files"));
 
@@ -1772,7 +1786,7 @@ static wmOperatorStatus sequencer_add_image_strip_exec(bContext *C, wmOperator *
      * is set, every frame between `offset` and `max_framenr` . */
     sequencer_add_image_strip_load_files(op, scene, strip, &load_data, range);
 
-    seq::add_image_init_alpha_mode(strip);
+    seq::add_image_init_alpha_mode(bmain, scene, strip);
 
     /* Adjust starting length of strip.
      * Note that this length differs from `strip->len`, which is always 1 for single images. */
@@ -2033,8 +2047,6 @@ static std::string sequencer_add_effect_strip_get_description(bContext * /*C*/,
       return TIP_("Add a wipe transition strip for two selected strips with video content");
     case STRIP_TYPE_GLOW:
       return TIP_("Add a glow effect strip for a single selected strip with video content");
-    case STRIP_TYPE_TRANSFORM:
-      return TIP_("Add a transform effect strip for a single selected strip with video content");
     case STRIP_TYPE_COLOR:
       return TIP_("Add a color strip to the sequencer");
     case STRIP_TYPE_SPEED:

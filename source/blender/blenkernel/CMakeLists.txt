@@ -147,6 +147,7 @@ set(SRC
   intern/grease_pencil_vertex_groups.cc
   intern/icons.cc
   intern/icons_rasterize.cc
+  intern/id_hash.cc
   intern/idprop.cc
   intern/idprop_create.cc
   intern/idprop_serialize.cc
@@ -160,7 +161,6 @@ set(SRC
   intern/image_save.cc
   intern/instances.cc
   intern/instances_attributes.cc
-  intern/ipo.cc
   intern/kelvinlet.cc
   intern/key.cc
   intern/keyconfig.cc
@@ -419,7 +419,8 @@ set(SRC
   BKE_grease_pencil.hh
   BKE_grease_pencil_legacy_convert.hh
   BKE_grease_pencil_vertex_groups.hh
-  BKE_icons.h
+  BKE_icons.hh
+  BKE_id_hash.hh
   BKE_idprop.hh
   BKE_idtype.hh
   BKE_image.hh
@@ -428,7 +429,6 @@ set(SRC
   BKE_image_save.hh
   BKE_image_wrappers.hh
   BKE_instances.hh
-  BKE_ipo.h
   BKE_kelvinlet.h
   BKE_key.hh
   BKE_keyconfig.h
@@ -506,8 +506,8 @@ set(SRC
   BKE_shader_fx.h
   BKE_shrinkwrap.hh
   BKE_softbody.h
-  BKE_sound.h
-  BKE_speaker.h
+  BKE_sound.hh
+  BKE_speaker.hh
   BKE_studiolight.h
   BKE_subdiv.hh
   BKE_subdiv_ccg.hh
@@ -534,6 +534,7 @@ set(SRC
   BKE_volume_grid_fields.hh
   BKE_volume_grid_file_cache.hh
   BKE_volume_grid_fwd.hh
+  BKE_volume_grid_process.hh
   BKE_volume_grid_type_traits.hh
   BKE_volume_openvdb.hh
   BKE_volume_render.hh
@@ -627,6 +628,10 @@ if(WITH_AUDASPACE)
     )
   endif()
   add_definitions(-DWITH_AUDASPACE)
+
+  if(WITH_RUBBERBAND)
+    add_definitions(-DWITH_RUBBERBAND)
+  endif()
 endif()
 
 if(WITH_BULLET)
@@ -707,36 +712,6 @@ endif()
 
 if(WITH_JACK)
   add_definitions(-DWITH_JACK)
-endif()
-
-if(WITH_LZO)
-  if(WITH_SYSTEM_LZO)
-    list(APPEND INC_SYS
-      ${LZO_INCLUDE_DIR}
-    )
-    list(APPEND LIB
-      ${LZO_LIBRARIES}
-    )
-    add_definitions(-DWITH_SYSTEM_LZO)
-  else()
-    list(APPEND INC_SYS
-      ../../../extern/lzo/minilzo
-    )
-    list(APPEND LIB
-      extern_minilzo
-    )
-  endif()
-  add_definitions(-DWITH_LZO)
-endif()
-
-if(WITH_LZMA)
-  list(APPEND INC_SYS
-    ../../../extern/lzma
-  )
-  list(APPEND LIB
-    extern_lzma
-  )
-  add_definitions(-DWITH_LZMA)
 endif()
 
 if(WITH_LIBMV)
@@ -827,6 +802,7 @@ if(WITH_GTESTS)
     intern/file_handler_test.cc
     intern/grease_pencil_test.cc
     intern/idprop_serialize_test.cc
+    intern/idprop_test.cc
     intern/image_partial_update_test.cc
     intern/image_test.cc
     intern/lattice_deform_test.cc
@@ -838,6 +814,7 @@ if(WITH_GTESTS)
     intern/main_test.cc
     intern/nla_test.cc
     intern/path_templates_test.cc
+    intern/scene_test.cc
     intern/subdiv_ccg_test.cc
     intern/tracking_test.cc
     intern/volume_test.cc

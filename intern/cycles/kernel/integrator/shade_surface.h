@@ -561,10 +561,10 @@ ccl_device_forceinline int integrate_surface_bsdf_bssrdf_bounce(
 
   /* Update path state */
   if (!(label & LABEL_TRANSPARENT)) {
+    const float min_ray_pdf = INTEGRATOR_STATE(state, path, min_ray_pdf);
     INTEGRATOR_STATE_WRITE(state, path, mis_ray_pdf) = mis_pdf;
     INTEGRATOR_STATE_WRITE(state, path, mis_origin_n) = sd->N;
-    INTEGRATOR_STATE_WRITE(state, path, min_ray_pdf) = fminf(
-        unguided_bsdf_pdf, INTEGRATOR_STATE(state, path, min_ray_pdf));
+    INTEGRATOR_STATE_WRITE(state, path, min_ray_pdf) = fminf(unguided_bsdf_pdf, min_ray_pdf);
 
 #ifdef __LIGHT_LINKING__
     if (kernel_data.kernel_features & KERNEL_FEATURE_LIGHT_LINKING) {
@@ -868,8 +868,8 @@ ccl_device_forceinline void integrator_shade_surface(KernelGlobals kg,
 
 #ifdef __SHADOW_LINKING__
   /* No need to cast shadow linking rays at a transparent bounce: the lights will be accumulated
-   * via the main path in this case. */
-  if ((continue_path_label & LABEL_TRANSPARENT) == 0) {
+   * via the main path in this case. BSSRDF bounces continue with intersect_subsurface. */
+  if ((continue_path_label & (LABEL_TRANSPARENT | LABEL_SUBSURFACE_SCATTER)) == 0) {
     if (shadow_linking_schedule_intersection_kernel<current_kernel>(kg, state)) {
       return;
     }

@@ -2,7 +2,10 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+#include "BLI_array_utils.hh"
+
 #include "node_geometry_util.hh"
+#include "shader/node_shader_util.hh"
 
 #include "DNA_node_types.h"
 
@@ -24,6 +27,7 @@
 #include "RNA_enum_types.hh"
 #include "RNA_prototypes.hh"
 
+#include "BKE_node_tree_reference_lifetimes.hh"
 #include "BKE_screen.hh"
 
 #include "WM_api.hh"
@@ -38,6 +42,9 @@ NODE_STORAGE_FUNCS(NodeMenuSwitch)
 
 static void node_declare(blender::nodes::NodeDeclarationBuilder &b)
 {
+  b.use_custom_socket_order();
+  b.allow_any_socket_order();
+
   const bNodeTree *ntree = b.tree_or_null();
   const bNode *node = b.node_or_null();
   if (node == nullptr) {
@@ -62,36 +69,57 @@ static void node_declare(blender::nodes::NodeDeclarationBuilder &b)
     menu_structure_type = StructureType::Single;
   }
 
+  auto &output = b.add_output(data_type, "Output");
+  if (supports_fields) {
+    output.dependent_field().reference_pass_all();
+  }
+  if (bke::node_tree_reference_lifetimes::can_contain_referenced_data(data_type)) {
+    output.propagate_all();
+  }
+  if (bke::node_tree_reference_lifetimes::can_contain_reference(data_type)) {
+    output.reference_pass_all();
+  }
+  output.structure_type(value_structure_type);
+
+  b.add_default_layout();
+
   auto &menu = b.add_input<decl::Menu>("Menu");
   if (supports_fields) {
     menu.supports_field();
   }
   menu.structure_type(menu_structure_type);
+  menu.optional_label();
 
   for (const NodeEnumItem &enum_item : storage.enum_definition.items()) {
     const std::string identifier = MenuSwitchItemsAccessor::socket_identifier_for_item(enum_item);
-    auto &input = b.add_input(data_type, enum_item.name, std::move(identifier))
+    auto &input = b.add_input(data_type, enum_item.name, identifier)
                       .socket_name_ptr(
                           &ntree->id, MenuSwitchItemsAccessor::item_srna, &enum_item, "name")
-                      .compositor_realization_mode(CompositorInputRealizationMode::None);
+                      .compositor_realization_mode(CompositorInputRealizationMode::None)
+                      .description("Becomes the output value if it is chosen by the menu input");
     if (supports_fields) {
       input.supports_field();
     }
     /* Labels are ugly in combination with data-block pickers and are usually disabled. */
-    input.hide_label(ELEM(data_type, SOCK_OBJECT, SOCK_IMAGE, SOCK_COLLECTION, SOCK_MATERIAL));
+    input.optional_label(ELEM(data_type, SOCK_OBJECT, SOCK_IMAGE, SOCK_COLLECTION, SOCK_MATERIAL));
     input.structure_type(value_structure_type);
+    auto &item_output = b.add_output<decl::Bool>(enum_item.name, std::move(identifier))
+                            .align_with_previous()
+                            .description("True if this item is chosen by the menu input");
+    if (supports_fields) {
+      item_output.dependent_field({menu.index()});
+      item_output.structure_type(menu_structure_type);
+    }
   }
 
-  auto &output = b.add_output(data_type, "Output");
-  if (supports_fields) {
-    output.dependent_field().reference_pass_all();
-  }
-  else if (data_type == SOCK_GEOMETRY) {
-    output.propagate_all();
-  }
-  output.structure_type(value_structure_type);
-
-  b.add_input<decl::Extend>("", "__extend__").structure_type(StructureType::Dynamic);
+  b.add_input<decl::Extend>("", "__extend__")
+      .structure_type(StructureType::Dynamic)
+      .custom_draw([](CustomSocketDrawParams &params) {
+        uiLayout &layout = params.layout;
+        layout.emboss_set(ui::EmbossType::None);
+        PointerRNA op_ptr = layout.op("node.enum_definition_item_add", "", ICON_ADD);
+        RNA_int_set(&op_ptr, "node_identifier", params.node.identifier);
+      });
 }
 
 static void node_layout(uiLayout *layout, bContext * /*C*/, PointerRNA *ptr)
@@ -167,7 +195,10 @@ class MenuSwitchFn : public mf::MultiFunction {
     for (const NodeEnumItem &enum_item : enum_def.items()) {
       builder.single_input(enum_item.name, type);
     }
-    builder.single_output("Output", type);
+    builder.single_output("Output", type, mf::ParamFlag::SupportsUnusedOutput);
+    for (const NodeEnumItem &item : enum_def.items()) {
+      builder.single_output<bool>(item.name, mf::ParamFlag::SupportsUnusedOutput);
+    }
 
     this->set_signature(&signature_);
   }
@@ -180,8 +211,15 @@ class MenuSwitchFn : public mf::MultiFunction {
     /* Use one extra mask at the end for invalid indices. */
     const int invalid_index = inputs_num;
 
-    GMutableSpan output = params.uninitialized_single_output(
-        signature_.params.index_range().last(), "Output");
+    GMutableSpan value_output = params.uninitialized_single_output_if_required(1 + inputs_num,
+                                                                               "Output");
+
+    Array<MutableSpan<bool>> item_mask_outputs(inputs_num);
+    for (const int item_i : IndexRange(inputs_num)) {
+      const int param_index = 2 + inputs_num + item_i;
+      item_mask_outputs[item_i] = params.uninitialized_single_output_if_required<bool>(
+          param_index);
+    }
 
     auto find_item_index = [&](const MenuValue value) -> int {
       for (const int i : enum_def_.items().index_range()) {
@@ -196,11 +234,27 @@ class MenuSwitchFn : public mf::MultiFunction {
     if (const std::optional<MenuValue> value = values.get_if_single()) {
       const int index = find_item_index(*value);
       if (index < inputs_num) {
-        const GVArray inputs = params.readonly_single_input(value_inputs_start + index);
-        inputs.materialize_to_uninitialized(mask, output.data());
+        if (!value_output.is_empty()) {
+          const GVArray inputs = params.readonly_single_input(value_inputs_start + index);
+          inputs.materialize_to_uninitialized(mask, value_output.data());
+        }
+        for (const int item_i : IndexRange(inputs_num)) {
+          MutableSpan<bool> item_mask_output = item_mask_outputs[item_i];
+          if (!item_mask_output.is_empty()) {
+            index_mask::masked_fill(item_mask_output, item_i == index, mask);
+          }
+        }
       }
       else {
-        type_.fill_construct_indices(type_.default_value(), output.data(), mask);
+        if (!value_output.is_empty()) {
+          type_.fill_construct_indices(type_.default_value(), value_output.data(), mask);
+        }
+        for (const int item_i : IndexRange(inputs_num)) {
+          MutableSpan<bool> item_mask_output = item_mask_outputs[item_i];
+          if (!item_mask_output.is_empty()) {
+            index_mask::masked_fill(item_mask_output, false, mask);
+          }
+        }
       }
       return;
     }
@@ -210,14 +264,23 @@ class MenuSwitchFn : public mf::MultiFunction {
     IndexMask::from_groups<int64_t>(
         mask, memory, [&](const int64_t i) { return find_item_index(values[i]); }, masks);
 
-    for (const int i : IndexRange(inputs_num)) {
-      if (!masks[i].is_empty()) {
-        const GVArray inputs = params.readonly_single_input(value_inputs_start + i);
-        inputs.materialize_to_uninitialized(masks[i], output.data());
+    for (const int item_i : IndexRange(inputs_num)) {
+      const IndexMask &mask_for_index = masks[item_i];
+      if (!mask_for_index.is_empty() && !value_output.is_empty()) {
+        const GVArray inputs = params.readonly_single_input(value_inputs_start + item_i);
+        inputs.materialize_to_uninitialized(mask_for_index, value_output.data());
+      }
+      MutableSpan<bool> item_mask_output = item_mask_outputs[item_i];
+      if (!item_mask_output.is_empty()) {
+        if (mask.size() != mask_for_index.size()) {
+          /* First set output to false before setting selected items to true. */
+          index_mask::masked_fill(item_mask_output, false, mask);
+        }
+        index_mask::masked_fill(item_mask_output, true, mask_for_index);
       }
     }
 
-    type_.fill_construct_indices(type_.default_value(), output.data(), masks[invalid_index]);
+    type_.fill_construct_indices(type_.default_value(), value_output.data(), masks[invalid_index]);
   }
 };
 
@@ -252,6 +315,11 @@ class LazyFunctionForMenuSwitchNode : public LazyFunction {
     }
     lf_index_by_bsocket[node.output_socket(0).index_in_tree()] = outputs_.append_and_get_index_as(
         "Value", CPPType::get<bke::SocketValueVariant>());
+    for (const int i : enum_def_.items().index_range()) {
+      const NodeEnumItem &enum_item = enum_def_.items()[i];
+      lf_index_by_bsocket[node.output_socket(i + 1).index_in_tree()] =
+          outputs_.append_and_get_index_as(enum_item.name, CPPType::get<SocketValueVariant>());
+    }
   }
 
   void execute_impl(lf::Params &params, const lf::Context & /*context*/) const override
@@ -270,7 +338,8 @@ class LazyFunctionForMenuSwitchNode : public LazyFunction {
     for (const int i : IndexRange(enum_def_.items_num)) {
       const NodeEnumItem &enum_item = enum_def_.items_array[i];
       const int input_index = i + 1;
-      if (enum_item.identifier == condition.value) {
+      const bool is_selected = enum_item.identifier == condition.value;
+      if (is_selected) {
         SocketValueVariant *value_to_forward =
             params.try_get_input_data_ptr_or_request<SocketValueVariant>(input_index);
         if (value_to_forward == nullptr) {
@@ -282,6 +351,9 @@ class LazyFunctionForMenuSwitchNode : public LazyFunction {
       }
       else {
         params.set_input_unused(input_index);
+      }
+      if (!params.output_was_set(i + 1)) {
+        params.set_output(i + 1, SocketValueVariant(is_selected));
       }
     }
     /* No guarantee that the switch input matches any enum,
@@ -310,11 +382,13 @@ class LazyFunctionForMenuSwitchNode : public LazyFunction {
     }
     std::unique_ptr<MultiFunction> multi_function = std::make_unique<MenuSwitchFn>(
         enum_def_, *field_base_type_);
-    GField output_field{FieldOperation::from(std::move(multi_function), std::move(item_fields))};
+    std::shared_ptr<fn::FieldOperation> operation = FieldOperation::from(std::move(multi_function),
+                                                                         std::move(item_fields));
 
-    void *output_ptr = params.get_output_data_ptr(0);
-    SocketValueVariant::ConstructIn(output_ptr, std::move(output_field));
-    params.output_set(0);
+    params.set_output(0, SocketValueVariant::From(GField(operation, 0)));
+    for (const int item_i : IndexRange(enum_def_.items_num)) {
+      params.set_output(item_i + 1, SocketValueVariant::From(GField(operation, item_i + 1)));
+    }
   }
 };
 
@@ -364,24 +438,33 @@ class MenuSwitchOperation : public NodeOperation {
 
   void execute() override
   {
-    Result &output = this->get_result("Output");
+    Result &value_output = this->get_result("Output");
     const MenuValue menu_identifier = this->get_input("Menu").get_single_value<MenuValue>();
     const NodeEnumDefinition &enum_definition = node_storage(bnode()).enum_definition;
+    bool found_item = false;
 
     for (const int i : IndexRange(enum_definition.items_num)) {
       const NodeEnumItem &enum_item = enum_definition.items()[i];
-      if (enum_item.identifier != menu_identifier.value) {
-        continue;
-      }
       const std::string identifier = MenuSwitchItemsAccessor::socket_identifier_for_item(
           enum_item);
+      const bool is_selected = enum_item.identifier == menu_identifier.value;
+      Result &item_output = this->get_result(identifier);
+      if (item_output.should_compute()) {
+        item_output.allocate_single_value();
+        item_output.set_single_value(is_selected);
+      }
+      if (!is_selected) {
+        continue;
+      }
       const Result &input = this->get_input(identifier);
-      output.share_data(input);
-      return;
+      value_output.share_data(input);
+      found_item = true;
     }
 
-    /* The menu identifier didn't match any item, so allocate an invalid output. */
-    output.allocate_invalid();
+    if (!found_item) {
+      /* The menu identifier didn't match any item, so allocate an invalid output. */
+      value_output.allocate_invalid();
+    }
   }
 };
 
@@ -432,14 +515,17 @@ static void node_blend_read(bNodeTree & /*ntree*/, bNode &node, BlendDataReader 
 
 static const bNodeSocket *node_internally_linked_input(const bNodeTree & /*tree*/,
                                                        const bNode &node,
-                                                       const bNodeSocket & /*output_socket*/)
+                                                       const bNodeSocket &output_socket)
 {
   const NodeMenuSwitch &storage = node_storage(node);
   if (storage.enum_definition.items_num == 0) {
     return nullptr;
   }
-  /* Default to the first enum item input. */
-  return &node.input_socket(1);
+  if (&output_socket == node.outputs.first) {
+    /* Default to the first enum item input. */
+    return &node.input_socket(1);
+  }
+  return nullptr;
 }
 
 static const EnumPropertyItem *data_type_items_callback(bContext * /*C*/,
@@ -473,7 +559,7 @@ static void register_node()
 {
   static blender::bke::bNodeType ntype;
 
-  geo_cmp_node_type_base(&ntype, "GeometryNodeMenuSwitch", GEO_NODE_MENU_SWITCH);
+  common_node_type_base(&ntype, "GeometryNodeMenuSwitch", GEO_NODE_MENU_SWITCH);
   ntype.ui_name = "Menu Switch";
   ntype.ui_description = "Select from multiple inputs by name";
   ntype.enum_name_legacy = "MENU_SWITCH";

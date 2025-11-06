@@ -535,6 +535,8 @@ int ED_fileselect_asset_import_method_get(const SpaceFile *sfile, const FileDirE
       return ASSET_IMPORT_APPEND;
     case FILE_ASSET_IMPORT_APPEND_REUSE:
       return ASSET_IMPORT_APPEND_REUSE;
+    case FILE_ASSET_IMPORT_PACK:
+      return ASSET_IMPORT_PACK;
 
       /* Should be handled above already. Break and fail below. */
     case FILE_ASSET_IMPORT_FOLLOW_PREFS:
@@ -619,6 +621,7 @@ void ED_fileselect_activate_by_relpath(SpaceFile *sfile, const char *relative_pa
 
 void ED_fileselect_deselect_all(SpaceFile *sfile)
 {
+  BLI_assert(sfile->files);
   file_select_deselect_all(sfile, FILE_SEL_SELECTED);
   WM_main_add_notifier(NC_SPACE | ND_SPACE_FILE_PARAMS, nullptr);
 }
@@ -685,9 +688,7 @@ void ED_fileselect_set_params_from_userdef(SpaceFile *sfile)
   }
 }
 
-void ED_fileselect_params_to_userdef(SpaceFile *sfile,
-                                     const int temp_win_size[2],
-                                     const bool is_maximized)
+void ED_fileselect_params_to_userdef(SpaceFile *sfile)
 {
   FileSelectParams *params = ED_fileselect_get_active_params(sfile);
   UserDef_FileSpaceData *sfile_udata_new = &U.file_space_data;
@@ -709,11 +710,6 @@ void ED_fileselect_params_to_userdef(SpaceFile *sfile,
     /* In this case also remember the invert flag. */
     sfile_udata_new->flag = (sfile_udata_new->flag & ~FILE_SORT_INVERT) |
                             (params->flag & FILE_SORT_INVERT);
-  }
-
-  if (temp_win_size && !is_maximized) {
-    sfile_udata_new->temp_win_sizex = temp_win_size[0];
-    sfile_udata_new->temp_win_sizey = temp_win_size[1];
   }
 
   /* Tag preferences as dirty if something has changed. */
@@ -1237,6 +1233,7 @@ int autocomplete_directory(bContext *C, char *str, void * /*arg_v*/)
 
     BLI_path_split_dir_part(str, dirname, sizeof(dirname));
 
+    BLI_assert(!BLI_path_is_rel(dirname));
     dir = opendir(dirname);
 
     if (dir) {
@@ -1327,21 +1324,7 @@ void ED_fileselect_exit(wmWindowManager *wm, SpaceFile *sfile)
     return;
   }
   if (sfile->op) {
-    wmWindow *temp_win = (wm->runtime->winactive &&
-                          WM_window_is_temp_screen(wm->runtime->winactive)) ?
-                             wm->runtime->winactive :
-                             nullptr;
-    if (temp_win) {
-      int win_size[2];
-      bool is_maximized;
-
-      ED_fileselect_window_params_get(temp_win, win_size, &is_maximized);
-      ED_fileselect_params_to_userdef(sfile, win_size, is_maximized);
-    }
-    else {
-      ED_fileselect_params_to_userdef(sfile, nullptr, false);
-    }
-
+    ED_fileselect_params_to_userdef(sfile);
     WM_event_fileselect_event(wm, sfile->op, EVT_FILESELECT_EXTERNAL_CANCEL);
     sfile->op = nullptr;
   }

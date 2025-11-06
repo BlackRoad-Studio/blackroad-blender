@@ -47,7 +47,7 @@ class VKFrameBuffer : public FrameBuffer {
 
   void bind(bool enabled_srgb) override;
   bool check(char err_out[256]) override;
-  void clear(eGPUFrameBufferBits buffers,
+  void clear(GPUFrameBufferBits buffers,
              const float clear_color[4],
              float clear_depth,
              uint clear_stencil) override;
@@ -63,20 +63,20 @@ class VKFrameBuffer : public FrameBuffer {
                                Span<GPUAttachmentState> color_attachment_states) override;
 
  public:
-  void read(eGPUFrameBufferBits planes,
+  void read(GPUFrameBufferBits planes,
             eGPUDataFormat format,
             const int area[4],
             int channel_len,
             int slot,
             void *r_data) override;
 
-  void blit_to(eGPUFrameBufferBits planes,
+  void blit_to(GPUFrameBufferBits planes,
                int src_slot,
                FrameBuffer *dst,
                int dst_slot,
                int dst_offset_x,
                int dst_offset_y) override;
-
+  uint32_t viewport_size() const;
   void vk_viewports_append(Vector<VkViewport> &r_viewports) const;
   void vk_render_areas_append(Vector<VkRect2D> &r_render_areas) const;
   void render_area_update(VkRect2D &render_area) const;
@@ -136,7 +136,7 @@ class VKFrameBuffer : public FrameBuffer {
  private:
   /* Clearing attachments */
   void build_clear_attachments_depth_stencil(
-      eGPUFrameBufferBits buffers,
+      GPUFrameBufferBits buffers,
       float clear_depth,
       uint32_t clear_stencil,
       render_graph::VKClearAttachmentsNode::CreateInfo &clear_attachments) const;
@@ -147,7 +147,7 @@ class VKFrameBuffer : public FrameBuffer {
   void clear(render_graph::VKClearAttachmentsNode::CreateInfo &clear_attachments);
 };
 
-static inline VKFrameBuffer *unwrap(FrameBuffer *framebuffer)
+static inline VKFrameBuffer *unwrap(gpu::FrameBuffer *framebuffer)
 {
   return static_cast<VKFrameBuffer *>(framebuffer);
 }

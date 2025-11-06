@@ -50,7 +50,6 @@ const EnumPropertyItem rna_enum_operator_context_items[] = {
 const EnumPropertyItem rna_enum_uilist_layout_type_items[] = {
     {UILST_LAYOUT_DEFAULT, "DEFAULT", 0, "Default Layout", "Use the default, multi-rows layout"},
     {UILST_LAYOUT_COMPACT, "COMPACT", 0, "Compact Layout", "Use the compact, single-row layout"},
-    {UILST_LAYOUT_GRID, "GRID", 0, "Grid Layout", "Use the grid-based layout"},
     {0, nullptr, 0, nullptr, nullptr},
 };
 
@@ -1692,11 +1691,7 @@ static void rna_def_ui_layout(BlenderRNA *brna)
        0,
        "Pull-down Menu",
        "Draw pull-down menu style"},
-      {int(blender::ui::EmbossType::PieMenu),
-       "RADIAL_MENU",
-       0,
-       "Pie Menu",
-       "Draw radial menu style"},
+      {int(blender::ui::EmbossType::PieMenu), "PIE_MENU", 0, "Pie Menu", "Draw radial menu style"},
       {int(blender::ui::EmbossType::NoneOrStatus),
        "NONE_OR_STATUS",
        0,
@@ -2371,8 +2366,10 @@ static void rna_def_asset_shelf(BlenderRNA *brna)
   RNA_def_property_enum_sdna(prop, nullptr, "type->space_type");
   RNA_def_property_enum_items(prop, rna_enum_space_type_items);
   RNA_def_property_flag(prop, PROP_REGISTER);
-  RNA_def_property_ui_text(
-      prop, "Space Type", "The space where the asset shelf is going to be used in");
+  RNA_def_property_ui_text(prop,
+                           "Space Type",
+                           "The space where the asset shelf will show up in. Ignored for popup "
+                           "asset shelves which can be displayed in any space.");
 
   prop = RNA_def_property(srna, "bl_options", PROP_ENUM, PROP_NONE);
   RNA_def_property_flag(prop, PROP_REGISTER_OPTIONAL | PROP_ENUM_FLAG);
@@ -2440,7 +2437,7 @@ static void rna_def_asset_shelf(BlenderRNA *brna)
                          "asset_reference",
                          "AssetWeakReference",
                          "",
-                         "The weak reference to the asset to be hightlighted as active, or None");
+                         "The weak reference to the asset to be highlighted as active, or None");
   RNA_def_function_return(func, parm);
 
   func = RNA_def_function(srna, "draw_context_menu", nullptr);

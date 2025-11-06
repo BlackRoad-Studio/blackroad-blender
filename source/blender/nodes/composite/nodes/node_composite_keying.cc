@@ -28,16 +28,19 @@ namespace blender::nodes::node_composite_keying_cc {
 static void cmp_node_keying_declare(NodeDeclarationBuilder &b)
 {
   b.use_custom_socket_order();
+  b.allow_any_socket_order();
 
-  b.add_output<decl::Color>("Image").structure_type(StructureType::Dynamic);
+  b.add_input<decl::Color>("Image")
+      .default_value({0.8f, 0.8f, 0.8f, 1.0f})
+      .hide_value()
+      .structure_type(StructureType::Dynamic);
+  b.add_output<decl::Color>("Image").structure_type(StructureType::Dynamic).align_with_previous();
+
   b.add_output<decl::Float>("Matte").structure_type(StructureType::Dynamic);
   b.add_output<decl::Float>("Edges")
       .structure_type(StructureType::Dynamic)
       .translation_context(BLT_I18NCONTEXT_ID_IMAGE);
 
-  b.add_input<decl::Color>("Image")
-      .default_value({0.8f, 0.8f, 0.8f, 1.0f})
-      .structure_type(StructureType::Dynamic);
   b.add_input<decl::Color>("Key Color")
       .default_value({1.0f, 1.0f, 1.0f, 1.0f})
       .structure_type(StructureType::Dynamic);
@@ -133,7 +136,9 @@ static void cmp_node_keying_declare(NodeDeclarationBuilder &b)
           "means dilation");
   postprocess_panel.add_input<decl::Menu>("Feather Falloff")
       .default_value(PROP_SMOOTH)
-      .static_items(rna_enum_proportional_falloff_curve_only_items);
+      .static_items(rna_enum_proportional_falloff_curve_only_items)
+      .optional_label()
+      .translation_context(BLT_I18NCONTEXT_ID_CURVE_LEGACY);
 
   PanelDeclarationBuilder &despill_panel = b.add_panel("Despill").default_closed(true);
   despill_panel.add_input<decl::Float>("Strength", "Despill Strength")
@@ -287,19 +292,19 @@ class KeyingOperation : public NodeOperation {
     output.allocate_texture(input.domain());
 
     parallel_for(input.domain().size, [&](const int2 texel) {
-      const float4 color = input.load_pixel<float4>(texel);
+      const Color color = input.load_pixel<Color>(texel);
       float4 color_ycca;
-      rgb_to_ycc(color.x,
-                 color.y,
-                 color.z,
+      rgb_to_ycc(color.r,
+                 color.g,
+                 color.b,
                  &color_ycca.x,
                  &color_ycca.y,
                  &color_ycca.z,
                  BLI_YCC_ITU_BT709);
       color_ycca /= 255.0f;
-      color_ycca.w = color.w;
+      color_ycca.w = color.a;
 
-      output.store_pixel(texel, color_ycca);
+      output.store_pixel(texel, Color(color_ycca));
     });
 
     return output;
@@ -345,17 +350,17 @@ class KeyingOperation : public NodeOperation {
     output.allocate_texture(input.domain());
 
     parallel_for(input.domain().size, [&](const int2 texel) {
-      const float4 color = input.load_pixel<float4>(texel);
+      const Color color = input.load_pixel<Color>(texel);
       float4 color_ycca;
-      rgb_to_ycc(color.x,
-                 color.y,
-                 color.z,
+      rgb_to_ycc(color.r,
+                 color.g,
+                 color.b,
                  &color_ycca.x,
                  &color_ycca.y,
                  &color_ycca.z,
                  BLI_YCC_ITU_BT709);
 
-      const float2 new_chroma_cb_cr = new_chroma.load_pixel<float4>(texel).yz();
+      const float2 new_chroma_cb_cr = float4(new_chroma.load_pixel<Color>(texel)).yz();
       color_ycca.y = new_chroma_cb_cr.x * 255.0f;
       color_ycca.z = new_chroma_cb_cr.y * 255.0f;
 
@@ -367,9 +372,9 @@ class KeyingOperation : public NodeOperation {
                  &color_rgba.y,
                  &color_rgba.z,
                  BLI_YCC_ITU_BT709);
-      color_rgba.w = color.w;
+      color_rgba.w = color.a;
 
-      output.store_pixel(texel, color_rgba);
+      output.store_pixel(texel, Color(color_rgba));
     });
 
     return output;
@@ -432,7 +437,7 @@ class KeyingOperation : public NodeOperation {
     };
 
     parallel_for(input.domain().size, [&](const int2 texel) {
-      float4 input_color = input.load_pixel<float4>(texel);
+      float4 input_color = float4(input.load_pixel<Color>(texel));
 
       /* We assume that the keying screen will not be overexposed in the image, so if the input
        * brightness is high, we assume the pixel is opaque. */
@@ -441,7 +446,7 @@ class KeyingOperation : public NodeOperation {
         return;
       }
 
-      float4 key_color = key.load_pixel<float4, true>(texel);
+      float4 key_color = float4(key.load_pixel<Color, true>(texel));
       int3 key_saturation_indices = compute_saturation_indices(key_color.xyz());
       float input_saturation = compute_saturation(input_color, key_saturation_indices);
       float key_saturation = compute_saturation(key_color, key_saturation_indices);
@@ -777,8 +782,8 @@ class KeyingOperation : public NodeOperation {
     };
 
     parallel_for(input.domain().size, [&](const int2 texel) {
-      float4 key_color = key.load_pixel<float4, true>(texel);
-      float4 color = input.load_pixel<float4>(texel);
+      float4 key_color = float4(key.load_pixel<Color, true>(texel));
+      float4 color = float4(input.load_pixel<Color>(texel));
       float matte = matte_image.load_pixel<float>(texel);
 
       /* Alpha multiply the matte to the image. */
@@ -790,7 +795,7 @@ class KeyingOperation : public NodeOperation {
           color[indices.y], color[indices.z], despill_balance);
       color[indices.x] -= math::max(0.0f, (color[indices.x] - weighted_average) * despill_factor);
 
-      output.store_pixel(texel, color);
+      output.store_pixel(texel, Color(color));
     });
   }
 

@@ -28,25 +28,32 @@ static const EnumPropertyItem type_items[] = {
     {CMP_NODE_TONE_MAP_PHOTORECEPTOR,
      "RD_PHOTORECEPTOR",
      0,
-     "R/D Photoreceptor",
-     "More advanced algorithm based on eye physiology, by Reinhard and Devlin"},
+     N_("R/D Photoreceptor"),
+     N_("More advanced algorithm based on eye physiology, by Reinhard and Devlin")},
     {CMP_NODE_TONE_MAP_SIMPLE,
      "RH_SIMPLE",
      0,
-     "Rh Simple",
-     "Simpler photographic algorithm by Reinhard"},
+     N_("Rh Simple"),
+     N_("Simpler photographic algorithm by Reinhard")},
     {0, nullptr, 0, nullptr, nullptr},
 };
 
 static void cmp_node_tonemap_declare(NodeDeclarationBuilder &b)
 {
+  b.use_custom_socket_order();
+  b.allow_any_socket_order();
+
   b.add_input<decl::Color>("Image")
       .default_value({1.0f, 1.0f, 1.0f, 1.0f})
+      .hide_value()
       .structure_type(StructureType::Dynamic);
+
+  b.add_output<decl::Color>("Image").structure_type(StructureType::Dynamic).align_with_previous();
 
   b.add_input<decl::Menu>("Type")
       .default_value(CMP_NODE_TONE_MAP_PHOTORECEPTOR)
-      .static_items(type_items);
+      .static_items(type_items)
+      .optional_label();
 
   b.add_input<decl::Float>("Key")
       .default_value(0.18f)
@@ -100,8 +107,6 @@ static void cmp_node_tonemap_declare(NodeDeclarationBuilder &b)
           "Specifies if tone mapping operates on the luminance or on each channel independently, "
           "0 means it uses luminance, 1 means it is per channel, and values in between blends "
           "between both");
-
-  b.add_output<decl::Color>("Image").structure_type(StructureType::Dynamic);
 }
 
 static void node_composit_init_tonemap(bNodeTree * /*ntree*/, bNode *node)
@@ -194,7 +199,7 @@ class ToneMapOperation : public NodeOperation {
     output.allocate_texture(domain);
 
     parallel_for(domain.size, [&](const int2 texel) {
-      float4 input_color = image.load_pixel<float4>(texel);
+      float4 input_color = float4(image.load_pixel<Color>(texel));
 
       /* Equation (2) from Reinhard's 2002 paper. */
       float4 scaled_color = input_color * luminance_scale;
@@ -208,7 +213,7 @@ class ToneMapOperation : public NodeOperation {
         tone_mapped_color = math::pow(math::max(tone_mapped_color, float4(0.0f)), inverse_gamma);
       }
 
-      output.store_pixel(texel, float4(tone_mapped_color.xyz(), input_color.w));
+      output.store_pixel(texel, Color(float4(tone_mapped_color.xyz(), input_color.w)));
     });
   }
 
@@ -317,7 +322,7 @@ class ToneMapOperation : public NodeOperation {
     output.allocate_texture(domain);
 
     parallel_for(domain.size, [&](const int2 texel) {
-      float4 input_color = input.load_pixel<float4>(texel);
+      float4 input_color = float4(input.load_pixel<Color>(texel));
       float input_luminance = math::dot(input_color.xyz(), luminance_coefficients);
 
       /* Trilinear interpolation between equations (6) and (7) from Reinhard's 2005 paper. */
@@ -330,7 +335,7 @@ class ToneMapOperation : public NodeOperation {
       float4 semi_saturation = math::pow(intensity * adaptation_level, contrast);
       float4 tone_mapped_color = math::safe_divide(input_color, input_color + semi_saturation);
 
-      output.store_pixel(texel, float4(tone_mapped_color.xyz(), input_color.w));
+      output.store_pixel(texel, Color(float4(tone_mapped_color.xyz(), input_color.w)));
     });
   }
 

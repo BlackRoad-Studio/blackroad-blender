@@ -15,6 +15,7 @@ struct TimeMarker;
 struct bAnimContext;
 struct bContext;
 struct wmKeyConfig;
+struct ARegion;
 
 /* -------------------------------------------------------------------- */
 /** \name Drawing API
@@ -41,7 +42,7 @@ void ED_markers_draw(const bContext *C, int flag);
  *
  * \return A #TimeMarker list.
  */
-ListBase *ED_scene_markers_get(Scene *scene, ScrArea *area);
+ListBase *ED_scene_markers_get(const bContext *C, Scene *scene);
 
 /**
  * Public API for getting markers from context.
@@ -50,12 +51,7 @@ ListBase *ED_scene_markers_get(Scene *scene, ScrArea *area);
  */
 ListBase *ED_context_get_markers(const bContext *C);
 ListBase *ED_sequencer_context_get_markers(const bContext *C);
-/**
- * Public API for getting markers from "animation" context.
- *
- * \return A #TimeMarker list.
- */
-ListBase *ED_animcontext_get_markers(const bAnimContext *ac);
+ListBase *ED_scene_markers_get_from_area(Scene *scene, ViewLayer *view_layer, const ScrArea *area);
 
 /**
  * Apply some transformation to markers after the fact
@@ -98,6 +94,11 @@ void ED_markers_deselect_all(ListBase *markers, int action);
  * Get the first selected marker.
  */
 TimeMarker *ED_markers_get_first_selected(ListBase *markers);
+
+/**
+ * Returns true if the marker region is currently visible in the area.
+ */
+bool ED_markers_region_visible(const ScrArea *area, const ARegion *region);
 
 /** \} */
 

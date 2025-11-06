@@ -520,6 +520,7 @@ IDTypeInfo IDType_ID_AR = {
     /*foreach_id*/ armature_foreach_id,
     /*foreach_cache*/ nullptr,
     /*foreach_path*/ nullptr,
+    /*foreach_working_space_color*/ nullptr,
     /*owner_pointer_get*/ nullptr,
 
     /*blend_write*/ armature_blend_write,
@@ -1022,7 +1023,7 @@ static void equalize_cubic_bezier(const float control[4][3],
                                   const float *segment_scales,
                                   float *r_t_points)
 {
-  float(*coords)[3] = static_cast<float(*)[3]>(BLI_array_alloca(coords, temp_segments + 1));
+  float (*coords)[3] = static_cast<float (*)[3]>(BLI_array_alloca(coords, temp_segments + 1));
   float *pdist = static_cast<float *>(BLI_array_alloca(pdist, temp_segments + 1));
 
   /* Compute the first pass of bezier point coordinates. */
@@ -1860,7 +1861,7 @@ static void find_bbone_segment_index_straight(const bPoseChannel *pchan,
                                               float *r_blend_next)
 {
   const Mat4 *mats = pchan->runtime.bbone_deform_mats;
-  const float(*mat)[4] = mats[0].mat;
+  const float (*mat)[4] = mats[0].mat;
 
   /* Transform co to bone space and get its y component. */
   const float y = mat[0][1] * co[0] + mat[1][1] * co[1] + mat[2][1] * co[2] + mat[3][1];

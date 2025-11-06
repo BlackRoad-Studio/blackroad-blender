@@ -6,9 +6,9 @@
 #include "DNA_listBase.h"
 
 #include "BLI_compiler_attrs.h"
+#include "BLI_enum_flags.hh"
 #include "BLI_math_vector_types.hh"
 #include "BLI_sys_types.h"
-#include "BLI_utildefines.h"
 #include "BLI_utility_mixins.hh"
 
 /** \file
@@ -145,6 +145,9 @@ struct BlendFileReadReport {
   int resynced_lib_overrides_libraries_count;
   bool do_resynced_lib_overrides_libraries_list;
   LinkNode *resynced_lib_overrides_libraries;
+
+  /** Whether a pre-2.50 blend file was loaded, in which case any animation is lost. */
+  bool pre_animato_file_loaded;
 };
 
 /** Skip reading some data-block types (may want to skip screen data too). */
@@ -157,7 +160,7 @@ enum eBLOReadSkip {
   /** Do not attempt to re-use IDs from old bmain for unchanged ones in case of undo. */
   BLO_READ_SKIP_UNDO_OLD_MAIN = (1 << 2),
 };
-ENUM_OPERATORS(eBLOReadSkip, BLO_READ_SKIP_UNDO_OLD_MAIN)
+ENUM_OPERATORS(eBLOReadSkip)
 #define BLO_READ_SKIP_ALL (BLO_READ_SKIP_USERDEF | BLO_READ_SKIP_DATA)
 
 /**
@@ -403,6 +406,10 @@ enum eBLOLibLinkFlags {
    * see e.g. #BKE_blendfile_library_relocate.
    */
   BLO_LIBLINK_COLLECTION_NO_HIERARCHY_REBUILD = 1 << 26,
+  /**
+   * Pack the linked data-blocks to keep them working even if the source file is not available.
+   */
+  BLO_LIBLINK_PACK = 1 << 27,
 };
 
 /**
@@ -581,13 +588,13 @@ struct ID_Readfile_Data {
 };
 
 /**
- * Return `id->runtime.readfile_data->tags` if the `readfile_data` is allocated,
+ * Return `id->runtime->readfile_data->tags` if the `readfile_data` is allocated,
  * otherwise return an all-zero set of tags.
  */
 ID_Readfile_Data::Tags BLO_readfile_id_runtime_tags(ID &id);
 
 /**
- * Create the `readfile_data` if needed, and return `id->runtime.readfile_data->tags`.
+ * Create the `readfile_data` if needed, and return `id->runtime->readfile_data->tags`.
  *
  * Use it instead of #BLO_readfile_id_runtime_tags when tags need to be set.
  */

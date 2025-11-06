@@ -576,12 +576,11 @@ static void mesh_customdatacorrect_apply_vert(TransCustomDataLayer *tcld,
       bool co_prev_ok;
       bool co_next_ok;
 
-      /* In the unlikely case that we're next to a zero length edge -
-       * walk around the to the next.
+      /* In the unlikely case that we're next to a zero length edge - walk around to the next.
        *
        * Since we only need to check if the vertex is in this corner,
        * its not important _which_ loop - as long as its not overlapping
-       * 'sv->co_orig_3d', see: #45096. */
+       * `sv->co_orig_3d`, see: #45096. */
       project_plane_normalized_v3_v3v3(v_proj[0], co_prev, v_proj_axis);
       while (UNLIKELY(((co_prev_ok = (len_squared_v3v3(v_proj[1], v_proj[0]) > eps)) == false) &&
                       ((l_prev = l_prev->prev) != l->next)))
@@ -637,7 +636,7 @@ static void mesh_customdatacorrect_apply_vert(TransCustomDataLayer *tcld,
    */
   const bool update_loop_mdisps = is_moved && do_loop_mdisps && (tcld->cd_loop_mdisp_offset != -1);
   if (update_loop_mdisps) {
-    float(*faces_center)[3] = static_cast<float(*)[3]>(BLI_array_alloca(faces_center, l_num));
+    float (*faces_center)[3] = static_cast<float (*)[3]>(BLI_array_alloca(faces_center, l_num));
     BMLoop *l;
 
     BM_ITER_ELEM_INDEX (l, &liter, v, BM_LOOPS_OF_VERT, j) {
@@ -753,7 +752,7 @@ void transform_convert_mesh_islands_calc(BMEditMesh *em,
 
   /* Group variables. */
   int *groups_array = nullptr;
-  int(*group_index)[2] = nullptr;
+  int (*group_index)[2] = nullptr;
 
   bool has_only_single_islands = bm->totedgesel == 0 && bm->totfacesel == 0;
   if (has_only_single_islands && !calc_single_islands) {
@@ -787,12 +786,12 @@ void transform_convert_mesh_islands_calc(BMEditMesh *em,
 
     BLI_assert(data.island_tot);
     if (calc_island_center) {
-      data.center = static_cast<float(*)[3]>(
+      data.center = static_cast<float (*)[3]>(
           MEM_mallocN(sizeof(*data.center) * data.island_tot, __func__));
     }
 
     if (calc_island_axismtx) {
-      data.axismtx = static_cast<float(*)[3][3]>(
+      data.axismtx = static_cast<float (*)[3][3]>(
           MEM_mallocN(sizeof(*data.axismtx) * data.island_tot, __func__));
     }
 
@@ -882,11 +881,11 @@ void transform_convert_mesh_islands_calc(BMEditMesh *em,
 
     if (group_tot_single != 0) {
       if (calc_island_center) {
-        data.center = static_cast<float(*)[3]>(MEM_reallocN(
+        data.center = static_cast<float (*)[3]>(MEM_reallocN(
             data.center, sizeof(*data.center) * (data.island_tot + group_tot_single)));
       }
       if (calc_island_axismtx) {
-        data.axismtx = static_cast<float(*)[3][3]>(MEM_reallocN(
+        data.axismtx = static_cast<float (*)[3][3]>(MEM_reallocN(
             data.axismtx, sizeof(*data.axismtx) * (data.island_tot + group_tot_single)));
       }
 
@@ -1331,7 +1330,7 @@ void transform_convert_mesh_crazyspace_detect(TransInfo *t,
                                               BMEditMesh *em,
                                               TransMeshDataCrazySpace *r_crazyspace_data)
 {
-  float(*quats)[4] = nullptr;
+  float (*quats)[4] = nullptr;
   const int prop_mode = (t->flag & T_PROP_EDIT) ? (t->flag & T_PROP_EDIT_ALL) : 0;
   if (BKE_modifiers_get_cage_index(t->scene, tc->obedit, nullptr, true) != -1) {
     Array<float3, 0> defcos;
@@ -1361,7 +1360,7 @@ void transform_convert_mesh_crazyspace_detect(TransInfo *t,
     {
       const Array<float3> mappedcos = BKE_crazyspace_get_mapped_editverts(t->depsgraph,
                                                                           tc->obedit);
-      quats = static_cast<float(*)[4]>(
+      quats = static_cast<float (*)[4]>(
           MEM_mallocN(em->bm->totvert * sizeof(*quats), "crazy quats"));
       BKE_crazyspace_set_quats_editmesh(em, defcos, mappedcos, quats, !prop_mode);
     }
@@ -2179,10 +2178,10 @@ Array<TransDataVertSlideVert> transform_mesh_vert_slide_data_create(
   int td_selected_len = 0;
   tc->foreach_index_selected([&](const int /*i*/) { td_selected_len++; });
 
-  Array<TransDataVertSlideVert> r_sv(td_selected_len);
+  Array<TransDataVertSlideVert> sv_array(td_selected_len);
 
-  r_loc_dst_buffer.reserve(r_sv.size() * 4);
-  int r_sv_index = 0;
+  r_loc_dst_buffer.reserve(sv_array.size() * 4);
+  int sv_array_index = 0;
   tc->foreach_index_selected([&](const int i) {
     TransData *td = &tc->data[i];
     const int size_prev = r_loc_dst_buffer.size();
@@ -2203,7 +2202,7 @@ Array<TransDataVertSlideVert> transform_mesh_vert_slide_data_create(
       }
     }
 
-    TransDataVertSlideVert &sv = r_sv[r_sv_index];
+    TransDataVertSlideVert &sv = sv_array[sv_array_index];
     sv.td = &tc->data[i];
     /* The buffer address may change as the vector is resized. Avoid setting #Span. */
     // sv.targets = r_loc_dst_buffer.as_span().drop_front(size_prev);
@@ -2211,18 +2210,18 @@ Array<TransDataVertSlideVert> transform_mesh_vert_slide_data_create(
     /* Store the buffer size temporarily in `target_curr`. */
     sv.co_link_curr = r_loc_dst_buffer.size() - size_prev;
 
-    r_sv_index++;
+    sv_array_index++;
   });
 
   int start = 0;
-  for (TransDataVertSlideVert &sv : r_sv) {
+  for (TransDataVertSlideVert &sv : sv_array) {
     int size = sv.co_link_curr;
     sv.co_link_orig_3d = r_loc_dst_buffer.as_span().slice(start, size);
     sv.co_link_curr = 0;
     start += size;
   }
 
-  return r_sv;
+  return sv_array;
 }
 
 /** \} */
@@ -2339,8 +2338,8 @@ Array<TransDataEdgeSlideVert> transform_mesh_edge_slide_data_create(const TransD
 
   /* Alloc and initialize the #TransDataEdgeSlideVert. */
 
-  Array<TransDataEdgeSlideVert> r_sv(td_selected_len);
-  TransDataEdgeSlideVert *sv = r_sv.data();
+  Array<TransDataEdgeSlideVert> sv_array(td_selected_len);
+  TransDataEdgeSlideVert *sv = sv_array.data();
   int sv_index = 0;
   tc->foreach_index_selected([&](const int i) {
     TransData *td = &tc->data[i];
@@ -2380,8 +2379,8 @@ Array<TransDataEdgeSlideVert> transform_mesh_edge_slide_data_create(const TransD
 
   /* Compute the sliding groups. */
   int loop_nr = 0;
-  for (int i : r_sv.index_range()) {
-    TransDataEdgeSlideVert *sv = &r_sv[i];
+  for (int i : sv_array.index_range()) {
+    TransDataEdgeSlideVert *sv = &sv_array[i];
     if (sv->loop_nr != -1) {
       /* This vertex has already been computed. */
       continue;
@@ -2502,14 +2501,14 @@ Array<TransDataEdgeSlideVert> transform_mesh_edge_slide_data_create(const TransD
 
     next.i = td_connected[i_curr][0] != i_prev ? td_connected[i_curr][0] : td_connected[i_curr][1];
     if (next.i != -1) {
-      next.sv = &r_sv[next.i];
+      next.sv = &sv_array[next.i];
       next.v = static_cast<BMVert *>(next.sv->td->extra);
       next.vert_is_edge_pair = mesh_vert_is_inner(next.v);
     }
 
     curr.i = i_curr;
     if (curr.i != -1) {
-      curr.sv = &r_sv[curr.i];
+      curr.sv = &sv_array[curr.i];
       curr.v = static_cast<BMVert *>(curr.sv->td->extra);
       curr.vert_is_edge_pair = mesh_vert_is_inner(curr.v);
       if (next.i != -1) {
@@ -2525,7 +2524,7 @@ Array<TransDataEdgeSlideVert> transform_mesh_edge_slide_data_create(const TransD
         next_next.i = td_connected[next.i][0] != curr.i ? td_connected[next.i][0] :
                                                           td_connected[next.i][1];
         if (next_next.i != -1) {
-          next_next.sv = &r_sv[next_next.i];
+          next_next.sv = &sv_array[next_next.i];
           next_next.v = static_cast<BMVert *>(next_next.sv->td->extra);
           next_next.vert_is_edge_pair = mesh_vert_is_inner(next_next.v);
           next.e = BM_edge_exists(next.v, next_next.v);
@@ -2738,7 +2737,7 @@ Array<TransDataEdgeSlideVert> transform_mesh_edge_slide_data_create(const TransD
     loop_nr++;
   }
   *r_group_len = loop_nr;
-  return r_sv;
+  return sv_array;
 }
 
 /** \} */

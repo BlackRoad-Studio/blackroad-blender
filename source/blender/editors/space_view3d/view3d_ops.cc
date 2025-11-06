@@ -58,7 +58,7 @@ static wmOperatorStatus view3d_copybuffer_exec(bContext *C, wmOperator *op)
   using namespace blender::bke::blendfile;
 
   Main *bmain = CTX_data_main(C);
-  PartialWriteContext copybuffer{BKE_main_blendfile_path(bmain)};
+  PartialWriteContext copybuffer{*bmain};
 
   Object *obact = CTX_data_active_object(C);
   Object *obact_copy = nullptr;
@@ -89,6 +89,12 @@ static wmOperatorStatus view3d_copybuffer_exec(bContext *C, wmOperator *op)
     ob->flag &= ~OB_FLAG_ACTIVE_CLIPBOARD;
     num_copied += 1;
   }
+
+  if (num_copied == 0) {
+    BKE_report(op->reports, RPT_INFO, "No objects selected to copy");
+    return OPERATOR_CANCELLED;
+  }
+
   if (obact_copy) {
     obact_copy->flag |= OB_FLAG_ACTIVE_CLIPBOARD;
   }

@@ -144,7 +144,6 @@ static void curve_free_data(ID *id)
 static void curve_foreach_id(ID *id, LibraryForeachIDData *data)
 {
   Curve *curve = reinterpret_cast<Curve *>(id);
-  const int flag = BKE_lib_query_foreachid_process_flags_get(data);
 
   BKE_LIB_FOREACHID_PROCESS_IDSUPER(data, curve->bevobj, IDWALK_CB_NOP);
   BKE_LIB_FOREACHID_PROCESS_IDSUPER(data, curve->taperobj, IDWALK_CB_NOP);
@@ -157,10 +156,6 @@ static void curve_foreach_id(ID *id, LibraryForeachIDData *data)
   BKE_LIB_FOREACHID_PROCESS_IDSUPER(data, curve->vfontb, IDWALK_CB_USER);
   BKE_LIB_FOREACHID_PROCESS_IDSUPER(data, curve->vfonti, IDWALK_CB_USER);
   BKE_LIB_FOREACHID_PROCESS_IDSUPER(data, curve->vfontbi, IDWALK_CB_USER);
-
-  if (flag & IDWALK_DO_DEPRECATED_POINTERS) {
-    BKE_LIB_FOREACHID_PROCESS_ID_NOCHECK(data, curve->ipo, IDWALK_CB_USER);
-  }
 }
 
 static void curve_blend_write(BlendWriter *writer, ID *id, const void *id_address)
@@ -306,6 +301,7 @@ IDTypeInfo IDType_ID_CU_LEGACY = {
     /*foreach_id*/ curve_foreach_id,
     /*foreach_cache*/ nullptr,
     /*foreach_path*/ nullptr,
+    /*foreach_working_space_color*/ nullptr,
     /*owner_pointer_get*/ nullptr,
 
     /*blend_write*/ curve_blend_write,
@@ -3072,7 +3068,7 @@ static void calchandleNurb_intern(BezTriple *bezt,
                                   char fcurve_smoothing)
 {
   /* defines to avoid confusion */
-#define p2_h1 ((p2)-3)
+#define p2_h1 ((p2) - 3)
 #define p2_h2 ((p2) + 3)
 
   const float *p1, *p3;

@@ -113,7 +113,7 @@ bool OSLManager::need_update() const
 void OSLManager::device_update_pre(Device * /*device*/, Scene *scene)
 {
   if (scene->shader_manager->use_osl() || !scene->camera->script_name.empty()) {
-    shading_system_init();
+    shading_system_init(scene->shader_manager->get_scene_linear_space());
   }
 
   if (!need_update()) {
@@ -288,7 +288,7 @@ void OSLManager::device_free(Device *device, DeviceScene * /*dscene*/, Scene *sc
   });
 }
 
-void OSLManager::shading_system_init()
+void OSLManager::shading_system_init(ShaderManager::SceneLinearSpace colorspace)
 {
   /* No need to do anything if we already have shading systems. */
   if (!ss_map.empty()) {
@@ -298,7 +298,7 @@ void OSLManager::shading_system_init()
   /* create shading system, shared between different renders to reduce memory usage */
   const thread_scoped_lock lock(ss_shared_mutex);
 
-  foreach_osl_device(device_, [this](Device *sub_device, OSLGlobals *) {
+  foreach_osl_device(device_, [this, colorspace](Device *sub_device, OSLGlobals *) {
     const DeviceType device_type = sub_device->info.type;
 
     if (!ss_shared[device_type]) {
@@ -329,6 +329,21 @@ void OSLManager::shading_system_init()
       ss->attribute("commonspace", "world");
       ss->attribute("searchpath:shader", shader_path);
       ss->attribute("greedyjit", 1);
+
+      /* OSL doesn't accept an arbitrary space, so support a few specific spaces. */
+      switch (colorspace) {
+        case ShaderManager::SceneLinearSpace::Rec709:
+          ss->attribute("colorspace", OSL::Strings::Rec709);
+          break;
+        case ShaderManager::SceneLinearSpace::Rec2020:
+          ss->attribute("colorspace", OSL::Strings::HDTV);
+          break;
+        case ShaderManager::SceneLinearSpace::ACEScg:
+          ss->attribute("colorspace", OSL::Strings::ACEScg);
+          break;
+        case ShaderManager::SceneLinearSpace::Unknown:
+          break;
+      }
 
       const char *groupdata_alloc_str = getenv("CYCLES_OSL_GROUPDATA_ALLOC");
       if (groupdata_alloc_str) {
@@ -531,8 +546,6 @@ const char *OSLManager::shader_load_filepath(string filepath)
 
 const char *OSLManager::shader_load_bytecode(const string &hash, const string &bytecode)
 {
-  shading_system_init();
-
   foreach_shading_system(
       [hash, bytecode](OSL::ShadingSystem *ss) { ss->LoadMemoryCompiledShader(hash, bytecode); });
 
@@ -610,7 +623,7 @@ void OSLShaderManager::device_update_specific(Device *device,
                                                                  OSLGlobals *) {
       OSL::ShadingSystem *ss = scene->osl_manager->get_shading_system(sub_device);
 
-      OSLCompiler compiler(ss, scene, progress);
+      OSLCompiler compiler(ss, scene, progress, sub_device);
       compiler.background = (shader == background_shader);
       compiler.compile(shader);
     };
@@ -626,15 +639,16 @@ void OSLShaderManager::device_update_specific(Device *device,
   /* collect shader groups from all shaders */
   for (Shader *shader : scene->shaders) {
     OSLManager::OSLManager::foreach_osl_device(
-        device, [shader, background_shader](Device *, OSLGlobals *og) {
+        device, [shader, background_shader](Device *sub_device, OSLGlobals *og) {
           /* push state to array for lookup */
-          og->surface_state.push_back(shader->osl_surface_ref);
-          og->volume_state.push_back(shader->osl_volume_ref);
-          og->displacement_state.push_back(shader->osl_displacement_ref);
-          og->bump_state.push_back(shader->osl_surface_bump_ref);
+          const Shader::OSLCache &cache = shader->osl_cache[sub_device];
+          og->surface_state.push_back(cache.surface);
+          og->volume_state.push_back(cache.volume);
+          og->displacement_state.push_back(cache.displacement);
+          og->bump_state.push_back(cache.bump);
 
           if (shader == background_shader) {
-            og->background_state = shader->osl_surface_ref;
+            og->background_state = cache.surface;
           }
         });
 
@@ -689,7 +703,10 @@ OSLNode *OSLShaderManager::osl_node(ShaderGraph *graph,
     return nullptr;
   }
 
-  /* create query */
+  /* Ensure shading system exists before we try to load a shader. */
+  scene->osl_manager->shading_system_init(scene->shader_manager->get_scene_linear_space());
+
+  /* Load shader code. */
   const char *hash;
 
   if (!filepath.empty()) {
@@ -880,11 +897,12 @@ void OSLShaderManager::osl_image_handles(Device *device,
 
 /* Graph Compiler */
 
-OSLCompiler::OSLCompiler(OSL::ShadingSystem *ss, Scene *scene, Progress &progress)
+OSLCompiler::OSLCompiler(OSL::ShadingSystem *ss, Scene *scene, Progress &progress, Device *device)
     : scene(scene),
       progress(progress),
       services(static_cast<OSLRenderServices *>(ss->renderer())),
-      ss(ss)
+      ss(ss),
+      device(device)
 {
   current_type = SHADER_TYPE_SURFACE;
   current_shader = nullptr;
@@ -1484,37 +1502,24 @@ void OSLCompiler::compile(Shader *shader)
 
     current_shader = shader;
 
-    /* generate surface shader */
-    if (shader->reference_count() && shader->has_surface) {
-      shader->osl_surface_ref = compile_type(shader, graph, SHADER_TYPE_SURFACE);
+    Shader::OSLCache cache;
 
-      if (has_bump) {
-        shader->osl_surface_bump_ref = compile_type(shader, graph, SHADER_TYPE_BUMP);
+    if (shader->reference_count()) {
+      if (shader->has_surface) {
+        cache.surface = compile_type(shader, graph, SHADER_TYPE_SURFACE);
+        if (has_bump) {
+          cache.bump = compile_type(shader, graph, SHADER_TYPE_BUMP);
+        }
       }
-      else {
-        shader->osl_surface_bump_ref = OSL::ShaderGroupRef();
+      if (shader->has_volume) {
+        cache.volume = compile_type(shader, graph, SHADER_TYPE_VOLUME);
+      }
+      if (shader->has_displacement) {
+        cache.displacement = compile_type(shader, graph, SHADER_TYPE_DISPLACEMENT);
       }
     }
-    else {
-      shader->osl_surface_ref = OSL::ShaderGroupRef();
-      shader->osl_surface_bump_ref = OSL::ShaderGroupRef();
-    }
 
-    /* generate volume shader */
-    if (shader->reference_count() && shader->has_volume) {
-      shader->osl_volume_ref = compile_type(shader, graph, SHADER_TYPE_VOLUME);
-    }
-    else {
-      shader->osl_volume_ref = OSL::ShaderGroupRef();
-    }
-
-    /* generate displacement shader */
-    if (shader->reference_count() && shader->has_displacement) {
-      shader->osl_displacement_ref = compile_type(shader, graph, SHADER_TYPE_DISPLACEMENT);
-    }
-    else {
-      shader->osl_displacement_ref = OSL::ShaderGroupRef();
-    }
+    shader->osl_cache[device] = std::move(cache);
 
     /* Estimate emission for MIS. */
     shader->estimate_emission();

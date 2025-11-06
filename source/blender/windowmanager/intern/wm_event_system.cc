@@ -28,13 +28,13 @@
 
 #include "GHOST_C-api.h"
 
+#include "BLI_enum_flags.hh"
 #include "BLI_ghash.h"
 #include "BLI_listbase.h"
 #include "BLI_math_vector.h"
 #include "BLI_string.h"
 #include "BLI_string_utf8.h"
 #include "BLI_timer.h"
-#include "BLI_utildefines.h"
 
 #include "BKE_context.hh"
 #include "BKE_customdata.hh"
@@ -49,8 +49,6 @@
 #include "BKE_screen.hh"
 #include "BKE_undo_system.hh"
 #include "BKE_workspace.hh"
-
-#include "BKE_sound.h"
 
 #include "BLT_translation.hh"
 
@@ -120,7 +118,7 @@ enum eHandlerActionFlag {
   /** `WM_HANDLER_MODAL | WM_HANDLER_BREAK` means unhandled. */
   WM_HANDLER_MODAL = 1 << 2,
 };
-ENUM_OPERATORS(eHandlerActionFlag, WM_HANDLER_MODAL);
+ENUM_OPERATORS(eHandlerActionFlag);
 /** Comparison, for readability. */
 #define WM_HANDLER_CONTINUE ((eHandlerActionFlag)0)
 
@@ -521,6 +519,7 @@ void wm_event_do_depsgraph(bContext *C, bool is_after_open_file)
         DEG_graph_relations_update(depsgraph);
         DEG_tag_on_visible_update(bmain, depsgraph);
       }
+      DEG_make_active(depsgraph);
       BKE_scene_graph_update_tagged(depsgraph, bmain);
     }
 
@@ -622,10 +621,10 @@ void wm_event_do_notifiers(bContext *C)
       if (note->category == NC_WM) {
         if (ELEM(note->data, ND_FILEREAD, ND_FILESAVE)) {
           wm->file_saved = 1;
-          WM_window_title(wm, win);
+          WM_window_title_refresh(wm, win);
         }
         else if (note->data == ND_DATACHANGED) {
-          WM_window_title(wm, win);
+          WM_window_title_refresh(wm, win);
         }
         else if (note->data == ND_UNDO) {
           ED_preview_restart_queue_work(C);
@@ -746,7 +745,7 @@ void wm_event_do_notifiers(bContext *C)
         /* Pass. */
       }
       else if (note->category == NC_SCENE && note->reference &&
-               (note->reference != scene && note->reference != workspace->sequencer_scene))
+               !ELEM(note->reference, scene, workspace->sequencer_scene))
       {
         /* Pass. */
       }
@@ -2817,42 +2816,25 @@ static eHandlerActionFlag wm_handler_fileselect_do(bContext *C,
 
   switch (val) {
     case EVT_FILESELECT_FULL_OPEN: {
-      wmWindow *win = CTX_wm_window(C);
-      const blender::int2 window_size = WM_window_native_pixel_size(win);
-      const blender::int2 window_center = window_size / 2;
-
-      const rcti window_rect = {
-          /*xmin*/ window_center[0],
-          /*xmax*/ window_center[0] + int(U.file_space_data.temp_win_sizex * UI_SCALE_FAC),
-          /*ymin*/ window_center[1],
-          /*ymax*/ window_center[1] + int(U.file_space_data.temp_win_sizey * UI_SCALE_FAC),
-      };
-
-      if (ScrArea *area = ED_screen_temp_space_open(C,
-                                                    IFACE_("Blender File View"),
-                                                    &window_rect,
-                                                    SPACE_FILE,
-                                                    U.filebrowser_display_type,
-                                                    true))
-      {
-        ARegion *region_header = BKE_area_find_region_type(area, RGN_TYPE_HEADER);
-
-        BLI_assert(area->spacetype == SPACE_FILE);
-
-        region_header->flag |= RGN_FLAG_HIDDEN;
-        /* Header on bottom, #AZone triangle to toggle header looks misplaced at the top. */
-        region_header->alignment = RGN_ALIGN_BOTTOM;
-
-        /* Settings for file-browser, #sfile is not operator owner but sends events. */
-        SpaceFile *sfile = (SpaceFile *)area->spacedata.first;
-        sfile->op = handler->op;
-
-        ED_fileselect_set_params_from_userdef(sfile);
-      }
-      else {
-        BKE_report(&wm->runtime->reports, RPT_ERROR, "Failed to open window!");
+      ScrArea *area = ED_screen_temp_space_open(
+          C, IFACE_("Blender File View"), SPACE_FILE, U.filebrowser_display_type, true);
+      if (!area) {
+        BKE_report(&wm->runtime->reports, RPT_ERROR, "Failed to open file browser!");
         return WM_HANDLER_BREAK;
       }
+
+      ARegion *region_header = BKE_area_find_region_type(area, RGN_TYPE_HEADER);
+      BLI_assert(area->spacetype == SPACE_FILE);
+
+      region_header->flag |= RGN_FLAG_HIDDEN;
+      /* Header on bottom, #AZone triangle to toggle header looks misplaced at the top. */
+      region_header->alignment = RGN_ALIGN_BOTTOM;
+
+      /* Settings for file-browser, #sfile is not operator owner but sends events. */
+      SpaceFile *sfile = (SpaceFile *)area->spacedata.first;
+      sfile->op = handler->op;
+
+      ED_fileselect_set_params_from_userdef(sfile);
 
       action = WM_HANDLER_BREAK;
       break;
@@ -2894,11 +2876,7 @@ static eHandlerActionFlag wm_handler_fileselect_do(bContext *C,
             continue;
           }
 
-          int win_size[2];
-          bool is_maximized;
-          ED_fileselect_window_params_get(win, win_size, &is_maximized);
-          ED_fileselect_params_to_userdef(
-              static_cast<SpaceFile *>(file_area->spacedata.first), win_size, is_maximized);
+          ED_fileselect_params_to_userdef(static_cast<SpaceFile *>(file_area->spacedata.first));
 
           if (BLI_listbase_is_single(&file_area->spacedata)) {
             BLI_assert(root_win != win);
@@ -2930,8 +2908,7 @@ static eHandlerActionFlag wm_handler_fileselect_do(bContext *C,
         }
 
         if (!temp_win && ctx_area->full) {
-          ED_fileselect_params_to_userdef(
-              static_cast<SpaceFile *>(ctx_area->spacedata.first), nullptr, false);
+          ED_fileselect_params_to_userdef(static_cast<SpaceFile *>(ctx_area->spacedata.first));
           ED_screen_full_prevspace(C, ctx_area);
         }
       }
@@ -3526,9 +3503,6 @@ static eHandlerActionFlag wm_handlers_do_intern(bContext *C,
           LISTBASE_FOREACH (wmDropBox *, drop, handler->dropboxes) {
             /* Other drop custom types allowed. */
             if (event->custom == EVT_DATA_DRAGDROP) {
-              /* Drop handlers can perform multiple operations (e.g., collection drag-and-drop),
-               * but we want to treat it as a single operation. */
-              ED_undo_group_begin(C);
               ListBase *lb = (ListBase *)event->customdata;
               LISTBASE_FOREACH_MUTABLE (wmDrag *, drag, lb) {
                 if (drop->poll(C, drag, event)) {
@@ -3572,7 +3546,6 @@ static eHandlerActionFlag wm_handlers_do_intern(bContext *C,
               }
               /* Always exit all drags on a drop event, even if poll didn't succeed. */
               wm_drags_exit(wm, win);
-              ED_undo_group_end(C);
             }
           }
         }
@@ -4969,41 +4942,25 @@ bool WM_event_handler_region_marker_poll(const wmWindow *win,
                                          const ARegion *region,
                                          const wmEvent *event)
 {
-  switch (area->spacetype) {
-    case SPACE_ACTION: {
-      const SpaceAction *saction = static_cast<SpaceAction *>(area->spacedata.first);
-      if ((saction->flag & SACTION_SHOW_MARKERS) == 0) {
-        return false;
-      }
-      break;
-    }
-    case SPACE_GRAPH: {
-      const SpaceGraph *sgraph = static_cast<SpaceGraph *>(area->spacedata.first);
-      if ((sgraph->flag & SIPO_SHOW_MARKERS) == 0) {
-        return false;
-      }
-      break;
-    }
-    case SPACE_NLA: {
-      const SpaceNla *snla = static_cast<SpaceNla *>(area->spacedata.first);
-      if ((snla->flag & SNLA_SHOW_MARKERS) == 0) {
-        return false;
-      }
-      break;
-    }
-    case SPACE_SEQ: {
-      const SpaceSeq *seq = static_cast<SpaceSeq *>(area->spacedata.first);
-      if ((seq->flag & SEQ_SHOW_MARKERS) == 0) {
-        return false;
-      }
-      break;
-    }
-    default:
-      break;
+  if (!ED_markers_region_visible(area, region)) {
+    return false;
   }
 
-  const ListBase *markers = ED_scene_markers_get(WM_window_get_active_scene(win),
-                                                 const_cast<ScrArea *>(area));
+  /* Check for markers in the current scene, noting that the VSE uses a special sequencer scene. */
+  Scene *scene = WM_window_get_active_scene(win);
+
+  if (area->spacetype == SPACE_SEQ) {
+    WorkSpace *workspace = WM_window_get_active_workspace(win);
+    if (workspace && workspace->sequencer_scene) {
+      scene = workspace->sequencer_scene;
+    }
+    else {
+      return false;
+    }
+  }
+
+  const ListBase *markers = ED_scene_markers_get_from_area(
+      scene, WM_window_get_active_view_layer(win), area);
   if (BLI_listbase_is_empty(markers)) {
     return false;
   }
@@ -5024,8 +4981,8 @@ bool WM_event_handler_region_v2d_mask_no_marker_poll(const wmWindow *win,
     return false;
   }
   /* Casting away `const` is only needed for a non-constant return value. */
-  const ListBase *markers = ED_scene_markers_get(WM_window_get_active_scene(win),
-                                                 const_cast<ScrArea *>(area));
+  const ListBase *markers = ED_scene_markers_get_from_area(
+      WM_window_get_active_scene(win), WM_window_get_active_view_layer(win), area);
   if (markers && !BLI_listbase_is_empty(markers)) {
     return !WM_event_handler_region_marker_poll(win, area, region, event);
   }
@@ -5610,8 +5567,7 @@ constexpr wmTabletData wm_event_tablet_data_default()
   wmTabletData tablet_data{};
   tablet_data.active = EVT_TABLET_NONE;
   tablet_data.pressure = 1.0f;
-  tablet_data.tilt.x = 0.0f;
-  tablet_data.tilt.y = 0.0f;
+  tablet_data.tilt = blender::float2(0.0f, 0.0f);
   tablet_data.is_motion_absolute = false;
   return tablet_data;
 }

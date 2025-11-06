@@ -930,7 +930,7 @@ static bool foreach_libblock_link_append_common_processing(
     /* While we do not want to add non-linkable ID (shape keys...) to the list of linked items,
      * unfortunately they can use fully linkable valid IDs too, like actions. Those need to be
      * processed, so we need to recursively deal with them here. */
-    /* NOTE: Since we are by-passing checks in `BKE_library_foreach_ID_link` by manually calling it
+    /* NOTE: Since we are bypassing checks in `BKE_library_foreach_ID_link` by manually calling it
      * recursively, we need to take care of potential recursion cases ourselves (e.g.anim-data of
      * shape-key referencing the shape-key itself). */
     /* NOTE: in case both IDs (owner and 'used' ones) are non-linkable, we can assume we can break
@@ -945,6 +945,78 @@ static bool foreach_libblock_link_append_common_processing(
   }
 
   return true;
+}
+
+/** \} */
+
+/** \name Library packing code.
+ * \{ */
+
+void BKE_blendfile_link_pack(BlendfileLinkAppendContext *lapp_context, ReportList * /*reports*/)
+{
+  Main *bmain = lapp_context->params->bmain;
+
+  new_id_to_item_mapping_create(*lapp_context);
+
+  /* Find all newly linked data-blocks, these will need to be deleted after they have been
+   * successfully packed, to avoid keeping lots of unused linked IDs around.
+   *
+   * Also add them to the items list, such that they can be checked, and removed from the deletion
+   * set in case packing fails. */
+  blender::Set<ID *> linked_ids_to_delete;
+
+  ID *id_iter;
+  FOREACH_MAIN_ID_BEGIN (bmain, id_iter) {
+    if (!ID_IS_LINKED(id_iter) || ID_IS_PACKED(id_iter) ||
+        (id_iter->tag & ID_TAG_PRE_EXISTING) != 0)
+    {
+      continue;
+    }
+
+    linked_ids_to_delete.add(id_iter);
+
+    BlendfileLinkAppendContextItem *item = lapp_context->new_id_to_item.lookup_default(id_iter,
+                                                                                       nullptr);
+    if (item == nullptr) {
+      item = BKE_blendfile_link_append_context_item_add(
+          lapp_context, BKE_id_name(*id_iter), GS(id_iter->name), nullptr);
+      item->new_id = id_iter;
+      item->source_library = id_iter->lib;
+      /* Since we did not have an item for that ID yet, we know user did not select it
+       * explicitly, it was rather linked indirectly. This info is important for
+       * instantiation of collections.
+       */
+      item->tag |= LINK_APPEND_TAG_INDIRECT;
+      item->action = LINK_APPEND_ACT_UNSET;
+      new_id_to_item_mapping_add(*lapp_context, id_iter, *item);
+    }
+  }
+  FOREACH_MAIN_ID_END;
+
+  for (BlendfileLinkAppendContextItem &item : lapp_context->items) {
+    ID *id = item.new_id;
+    if (id == nullptr) {
+      continue;
+    }
+    BLI_assert(ID_IS_LINKED(id));
+    if (!(ID_IS_PACKED(id) || (id->newid && ID_IS_PACKED(id->newid)))) {
+      /* No yet packed. */
+      blender::bke::library::pack_linked_id_hierarchy(*bmain, *id);
+    }
+    /* Calling code may want to access newly packed embedded IDs from the link/append context
+     * items. */
+    if (id->newid) {
+      item.new_id = id->newid;
+    }
+
+    /* If packing failed for a linked ID, do not delete its linked version. */
+    if (!ID_IS_PACKED(item.new_id) && linked_ids_to_delete.contains(id)) {
+      linked_ids_to_delete.remove(id);
+    }
+  }
+  BKE_main_id_newptr_and_tag_clear(bmain);
+
+  BKE_id_multi_delete(bmain, linked_ids_to_delete);
 }
 
 /** \} */
@@ -1956,6 +2028,11 @@ static void blendfile_relocate_postprocess_cleanup(BlendfileLinkAppendContext &l
   FOREACH_MAIN_ID_BEGIN (&bmain, id_iter) {
     if (id_iter->lib) {
       ids_to_delete.remove(&id_iter->lib->id);
+      /* If the used library is an archive one, its owner 'normal' library is also used. */
+      if (id_iter->lib->archive_parent_library) {
+        BLI_assert(id_iter->lib->flag & LIBRARY_FLAG_IS_ARCHIVE);
+        ids_to_delete.remove(&id_iter->lib->archive_parent_library->id);
+      }
     }
   }
   FOREACH_MAIN_ID_END;
@@ -2059,7 +2136,8 @@ void BKE_blendfile_library_relocate(BlendfileLinkAppendContext *lapp_context,
   /* Since some IDs have been removed from Main, trying to rebuild collections hierarchy should not
    * happen. It has to be done manually below once removed IDs have been added back to Main. Also
    * see #136432. */
-  lapp_context->params->flag |= BLO_LIBLINK_COLLECTION_NO_HIERARCHY_REBUILD;
+  BKE_blendfile_link_append_context_flag_set(
+      lapp_context, BLO_LIBLINK_COLLECTION_NO_HIERARCHY_REBUILD, true);
 
   BKE_blendfile_link_append_context_init_done(lapp_context);
 

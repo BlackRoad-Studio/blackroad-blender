@@ -43,6 +43,8 @@
 
 #include "DEG_depsgraph_query.hh"
 
+#include "IMB_colormanagement.hh"
+
 #include "draw_attributes.hh"
 #include "draw_cache_impl.hh" /* own include */
 #include "draw_hair_private.hh"
@@ -354,9 +356,13 @@ static void ensure_seg_pt_count(PTCacheEdit *edit,
 static void particle_pack_mcol(MCol *mcol, ushort r_scol[3])
 {
   /* Convert to linear ushort and swizzle */
-  r_scol[0] = unit_float_to_ushort_clamp(BLI_color_from_srgb_table[mcol->b]);
-  r_scol[1] = unit_float_to_ushort_clamp(BLI_color_from_srgb_table[mcol->g]);
-  r_scol[2] = unit_float_to_ushort_clamp(BLI_color_from_srgb_table[mcol->r]);
+  float3 col = {BLI_color_from_srgb_table[mcol->r],
+                BLI_color_from_srgb_table[mcol->g],
+                BLI_color_from_srgb_table[mcol->b]};
+  IMB_colormanagement_rec709_to_scene_linear(col, col);
+  r_scol[0] = unit_float_to_ushort_clamp(col[2]);
+  r_scol[1] = unit_float_to_ushort_clamp(col[1]);
+  r_scol[2] = unit_float_to_ushort_clamp(col[0]);
 }
 
 /* Used by parent particles and simple children. */
@@ -601,7 +607,7 @@ static int particle_batch_cache_fill_segments(ParticleSystem *psys,
   const bool is_child = (particle_source == PARTICLE_SOURCE_CHILDREN);
   if (is_simple && *r_parent_uvs == nullptr) {
     /* TODO(sergey): For edit mode it should be edit->totcached. */
-    *r_parent_uvs = static_cast<float(**)[2]>(
+    *r_parent_uvs = static_cast<float (**)[2]>(
         MEM_callocN(sizeof(*r_parent_uvs) * psys->totpart, "Parent particle UVs"));
   }
   if (is_simple && *r_parent_mcol == nullptr) {
@@ -615,7 +621,7 @@ static int particle_batch_cache_fill_segments(ParticleSystem *psys,
       continue;
     }
     float tangent[3];
-    float(*uv)[2] = nullptr;
+    float (*uv)[2] = nullptr;
     MCol *mcol = nullptr;
     particle_calculate_mcol(psys,
                             psmd,
@@ -774,65 +780,59 @@ static void particle_batch_cache_ensure_pos_and_seg(PTCacheEdit *edit,
   HairAttributeID attr_id;
   uint *uv_id = nullptr;
   uint *col_id = nullptr;
-  int num_uv_layers = 0;
+  Vector<StringRef> color_attribute_names;
   int num_col_layers = 0;
-  int active_uv = 0;
-  int active_col = 0;
   const MTFace **mtfaces = nullptr;
   const MCol **mcols = nullptr;
-  float(**parent_uvs)[2] = nullptr;
+  float (**parent_uvs)[2] = nullptr;
   MCol **parent_mcol = nullptr;
 
+  VectorSet<StringRefNull> uv_map_names;
   if (psmd != nullptr) {
-    if (CustomData_has_layer(&psmd->mesh_final->corner_data, CD_PROP_FLOAT2)) {
-      num_uv_layers = CustomData_number_of_layers(&psmd->mesh_final->corner_data, CD_PROP_FLOAT2);
-      active_uv = CustomData_get_active_layer(&psmd->mesh_final->corner_data, CD_PROP_FLOAT2);
-    }
-    if (CustomData_has_layer(&psmd->mesh_final->corner_data, CD_PROP_BYTE_COLOR)) {
-      num_col_layers = CustomData_number_of_layers(&psmd->mesh_final->corner_data,
-                                                   CD_PROP_BYTE_COLOR);
-      if (psmd->mesh_final->active_color_attribute != nullptr) {
-        active_col = CustomData_get_named_layer(&psmd->mesh_final->corner_data,
-                                                CD_PROP_BYTE_COLOR,
-                                                psmd->mesh_final->active_color_attribute);
+    psmd->mesh_final->uv_map_names();
+    psmd->mesh_final->attributes().foreach_attribute([&](const bke::AttributeIter &iter) {
+      if (iter.domain == bke::AttrDomain::Corner && iter.data_type == bke::AttrType::ColorByte) {
+        color_attribute_names.append(iter.name);
       }
-    }
+    });
+    num_col_layers = color_attribute_names.size();
   }
+  int num_uv_layers = uv_map_names.size();
 
   attr_id.pos = GPU_vertformat_attr_add(&format, "pos", gpu::VertAttrType::SFLOAT_32_32_32);
   attr_id.tan = GPU_vertformat_attr_add(&format, "nor", gpu::VertAttrType::SFLOAT_32_32_32);
   attr_id.ind = GPU_vertformat_attr_add(&format, "ind", gpu::VertAttrType::SINT_32);
 
   if (psmd) {
+    const StringRef active_uv = psmd->mesh_final->default_uv_map_name();
+    const char *active_col = psmd->mesh_final->active_color_attribute;
     uv_id = MEM_malloc_arrayN<uint>(num_uv_layers, "UV attr format");
-    col_id = MEM_malloc_arrayN<uint>(num_col_layers, "Col attr format");
+    col_id = MEM_malloc_arrayN<uint>(color_attribute_names.size(), "Col attr format");
 
     for (int i = 0; i < num_uv_layers; i++) {
 
       char uuid[32], attr_safe_name[GPU_MAX_SAFE_ATTR_NAME];
-      const char *name = CustomData_get_layer_name(
-          &psmd->mesh_final->corner_data, CD_PROP_FLOAT2, i);
+      const StringRef name = uv_map_names[i];
       GPU_vertformat_safe_attr_name(name, attr_safe_name, GPU_MAX_SAFE_ATTR_NAME);
 
       SNPRINTF_UTF8(uuid, "a%s", attr_safe_name);
       uv_id[i] = GPU_vertformat_attr_add(&format, uuid, blender::gpu::VertAttrType::SFLOAT_32_32);
 
-      if (i == active_uv) {
+      if (name == active_uv) {
         GPU_vertformat_alias_add(&format, "a");
       }
     }
 
     for (int i = 0; i < num_col_layers; i++) {
+      const StringRef name = color_attribute_names[i];
       char uuid[32], attr_safe_name[GPU_MAX_SAFE_ATTR_NAME];
-      const char *name = CustomData_get_layer_name(
-          &psmd->mesh_final->corner_data, CD_PROP_BYTE_COLOR, i);
       GPU_vertformat_safe_attr_name(name, attr_safe_name, GPU_MAX_SAFE_ATTR_NAME);
 
       SNPRINTF_UTF8(uuid, "a%s", attr_safe_name);
       col_id[i] = GPU_vertformat_attr_add(
           &format, uuid, blender::gpu::VertAttrType::UNORM_16_16_16_16);
 
-      if (i == active_col) {
+      if (name == active_col) {
         GPU_vertformat_alias_add(&format, "c");
       }
     }
@@ -1309,12 +1309,13 @@ static int particle_mface_index(const ChildParticle &particle, int /*face_count_
 
 static float4 particle_mcol_convert(const MCol &mcol)
 {
-  float4 col;
   /* Convert to linear ushort and swizzle */
-  col[0] = BLI_color_from_srgb_table[mcol.b];
-  col[1] = BLI_color_from_srgb_table[mcol.g];
-  col[2] = BLI_color_from_srgb_table[mcol.r];
-  col[3] = mcol.a / 255.0f;
+  float4 col = {BLI_color_from_srgb_table[mcol.r],
+                BLI_color_from_srgb_table[mcol.g],
+                BLI_color_from_srgb_table[mcol.b],
+                mcol.a / 255.0f};
+  IMB_colormanagement_rec709_to_scene_linear(col, col);
+  std::swap(col[0], col[2]);
   return col;
 }
 

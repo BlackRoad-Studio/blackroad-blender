@@ -273,16 +273,11 @@ static void mesh_free_data(ID *id)
 static void mesh_foreach_id(ID *id, LibraryForeachIDData *data)
 {
   Mesh *mesh = reinterpret_cast<Mesh *>(id);
-  const int flag = BKE_lib_query_foreachid_process_flags_get(data);
 
   BKE_LIB_FOREACHID_PROCESS_IDSUPER(data, mesh->texcomesh, IDWALK_CB_NEVER_SELF);
   BKE_LIB_FOREACHID_PROCESS_IDSUPER(data, mesh->key, IDWALK_CB_USER);
   for (int i = 0; i < mesh->totcol; i++) {
     BKE_LIB_FOREACHID_PROCESS_IDSUPER(data, mesh->mat[i], IDWALK_CB_USER);
-  }
-
-  if (flag & IDWALK_DO_DEPRECATED_POINTERS) {
-    BKE_LIB_FOREACHID_PROCESS_ID_NOCHECK(data, mesh->ipo, IDWALK_CB_USER);
   }
 }
 
@@ -294,6 +289,32 @@ static void mesh_foreach_path(ID *id, BPathForeachPathData *bpath_data)
                                          mesh->corner_data.external->filepath,
                                          sizeof(mesh->corner_data.external->filepath));
   }
+}
+
+static void mesh_foreach_working_space_color(ID *id, const IDTypeForeachColorFunctionCallback &fn)
+{
+  Mesh *mesh = reinterpret_cast<Mesh *>(id);
+#if 0
+  /* In the future we'll be able to use just this. */
+  mesh->attribute_storage.wrap().foreach_working_space_color(fn);
+#else
+  auto convert_domain = [&fn](CustomData *customdata, size_t size) {
+    for (int i = 0; i < customdata->totlayer; i++) {
+      CustomDataLayer *layer = &customdata->layers[i];
+      if (layer->data && layer->type == CD_PROP_COLOR) {
+        fn.implicit_sharing_array(
+            *reinterpret_cast<blender::ImplicitSharingPtr<> *>(&layer->sharing_info),
+            reinterpret_cast<blender::ColorGeometry4f *&>(layer->data),
+            size);
+      }
+    }
+  };
+
+  convert_domain(&mesh->vert_data, mesh->verts_num);
+  convert_domain(&mesh->edge_data, mesh->edges_num);
+  convert_domain(&mesh->face_data, mesh->faces_num);
+  convert_domain(&mesh->corner_data, mesh->corners_num);
+#endif
 }
 
 static void mesh_blend_write(BlendWriter *writer, ID *id, const void *id_address)
@@ -373,6 +394,8 @@ static void mesh_blend_write(BlendWriter *writer, ID *id, const void *id_address
 
   const blender::bke::MeshRuntime *mesh_runtime = mesh->runtime;
   mesh->runtime = nullptr;
+
+  BLO_write_shared_tag(writer, mesh->face_offset_indices);
 
   BLO_write_id_struct(writer, Mesh, id_address, &mesh->id);
   BKE_id_blend_write(writer, &mesh->id);
@@ -492,6 +515,7 @@ IDTypeInfo IDType_ID_ME = {
     /*foreach_id*/ mesh_foreach_id,
     /*foreach_cache*/ nullptr,
     /*foreach_path*/ mesh_foreach_path,
+    /*foreach_working_space_color*/ mesh_foreach_working_space_color,
     /*owner_pointer_get*/ nullptr,
 
     /*blend_write*/ mesh_blend_write,
@@ -561,9 +585,7 @@ void mesh_ensure_default_color_attribute_on_add(Mesh &mesh,
   if (bke::attribute_name_is_anonymous(id)) {
     return;
   }
-  if (!(CD_TYPE_AS_MASK(*attr_type_to_custom_data_type(data_type)) & CD_MASK_COLOR_ALL) ||
-      !(ATTR_DOMAIN_AS_MASK(domain) & ATTR_DOMAIN_MASK_COLOR))
-  {
+  if (!mesh::is_color_attribute({domain, data_type})) {
     return;
   }
   if (mesh.default_color_attribute) {
@@ -584,35 +606,13 @@ void mesh_ensure_required_data_layers(Mesh &mesh)
   attributes.add(".corner_edge", AttrDomain::Corner, bke::AttrType::Int32, attribute_init);
 }
 
-static bool meta_data_matches(const std::optional<bke::AttributeMetaData> meta_data,
-                              const AttrDomainMask domains,
-                              const eCustomDataMask types)
-{
-  if (!meta_data) {
-    return false;
-  }
-  if (!(ATTR_DOMAIN_AS_MASK(meta_data->domain) & domains)) {
-    return false;
-  }
-  if (!(CD_TYPE_AS_MASK(*attr_type_to_custom_data_type(meta_data->data_type)) & types)) {
-    return false;
-  }
-  return true;
-}
-
 void mesh_remove_invalid_attribute_strings(Mesh &mesh)
 {
   bke::AttributeAccessor attributes = mesh.attributes();
-  if (!meta_data_matches(attributes.lookup_meta_data(mesh.active_color_attribute),
-                         ATTR_DOMAIN_MASK_COLOR,
-                         CD_MASK_COLOR_ALL))
-  {
+  if (!mesh::is_color_attribute(attributes.lookup_meta_data(mesh.active_color_attribute))) {
     MEM_SAFE_FREE(mesh.active_color_attribute);
   }
-  if (!meta_data_matches(attributes.lookup_meta_data(mesh.default_color_attribute),
-                         ATTR_DOMAIN_MASK_COLOR,
-                         CD_MASK_COLOR_ALL))
-  {
+  if (!mesh::is_color_attribute(attributes.lookup_meta_data(mesh.default_color_attribute))) {
     MEM_SAFE_FREE(mesh.default_color_attribute);
   }
 }
@@ -1191,6 +1191,45 @@ blender::bke::MutableAttributeAccessor Mesh::attributes_for_write()
                                                 blender::bke::mesh_attribute_accessor_functions());
 }
 
+blender::VectorSet<blender::StringRefNull> Mesh::uv_map_names() const
+{
+  blender::VectorSet<blender::StringRefNull> names;
+  this->attributes().foreach_attribute([&](const blender::bke::AttributeIter &iter) {
+    if (blender::bke::mesh::is_uv_map({iter.domain, iter.data_type})) {
+      names.add_new(iter.name);
+    }
+  });
+  return names;
+}
+
+blender::StringRefNull Mesh::active_uv_map_name() const
+{
+  /* Currently this information is stored in CustomData. Once it switches to using
+   * #Mesh::active_uv_map_attribute, this logic can be removed. This function's only purpose is to
+   * ease that transition. */
+  if (this->runtime->edit_mesh) {
+    const char *name = CustomData_get_active_layer_name(&this->runtime->edit_mesh->bm->ldata,
+                                                        CD_PROP_FLOAT2);
+    return name ? name : "";
+  }
+  const char *name = CustomData_get_active_layer_name(&this->corner_data, CD_PROP_FLOAT2);
+  return name ? name : "";
+}
+
+blender::StringRefNull Mesh::default_uv_map_name() const
+{
+  /* Currently this information is stored in CustomData. Once it switches to using
+   * #Mesh::default_uv_map_attribute, this logic can be removed. This function's only purpose is to
+   * ease that transition. */
+  if (this->runtime->edit_mesh) {
+    const char *name = CustomData_get_render_layer_name(&this->runtime->edit_mesh->bm->ldata,
+                                                        CD_PROP_FLOAT2);
+    return name ? name : "";
+  }
+  const char *name = CustomData_get_render_layer_name(&this->corner_data, CD_PROP_FLOAT2);
+  return name ? name : "";
+}
+
 Mesh *BKE_mesh_new_nomain(const int verts_num,
                           const int edges_num,
                           const int faces_num,
@@ -1212,6 +1251,35 @@ Mesh *BKE_mesh_new_nomain(const int verts_num,
 }
 
 namespace blender::bke {
+
+namespace mesh {
+
+bool is_uv_map(const AttributeMetaData &meta_data)
+{
+  return meta_data.domain == AttrDomain::Corner && meta_data.data_type == AttrType::Float2;
+}
+
+bool is_uv_map(const std::optional<AttributeMetaData> &meta_data)
+{
+  return meta_data && is_uv_map(*meta_data);
+}
+
+bool is_color_attribute(const blender::bke::AttributeMetaData &meta_data)
+{
+  return ELEM(meta_data.domain,
+              blender::bke::AttrDomain::Point,
+              blender::bke::AttrDomain::Corner) &&
+         ELEM(meta_data.data_type,
+              blender::bke::AttrType::ColorByte,
+              blender::bke::AttrType::ColorFloat);
+}
+
+bool is_color_attribute(const std::optional<blender::bke::AttributeMetaData> &meta_data)
+{
+  return meta_data && is_color_attribute(*meta_data);
+}
+
+}  // namespace mesh
 
 Mesh *mesh_new_no_attributes(const int verts_num,
                              const int edges_num,

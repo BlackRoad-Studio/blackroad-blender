@@ -37,6 +37,7 @@ set(SRC
   bpy_driver.cc
   bpy_geometry_set.cc
   bpy_gizmo_wrap.cc
+  bpy_inline_shader_nodes.cc
   bpy_interface.cc
   bpy_interface_atexit.cc
   bpy_interface_run.cc
@@ -45,6 +46,7 @@ set(SRC
   bpy_library_write.cc
   bpy_msgbus.cc
   bpy_operator.cc
+  bpy_operator_function.cc
   bpy_operator_wrap.cc
   bpy_path.cc
   bpy_props.cc
@@ -85,6 +87,7 @@ set(SRC
   bpy_driver.hh
   bpy_geometry_set.hh
   bpy_gizmo_wrap.hh
+  bpy_inline_shader_nodes.hh
   bpy_intern_string.hh
   bpy_library.hh
   bpy_msgbus.hh
@@ -130,6 +133,7 @@ set(LIB
   PRIVATE bf::animrig
   bf_python_gpu
   PRIVATE bf::imbuf::opencolorio
+  PRIVATE bf::nodes
 
   ${PYTHON_LINKFLAGS}
   ${PYTHON_LIBRARIES}

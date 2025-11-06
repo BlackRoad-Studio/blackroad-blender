@@ -38,6 +38,7 @@
 #include "BKE_main_namemap.hh"
 #include "BKE_report.hh"
 
+#include "IMB_colormanagement.hh"
 #include "IMB_imbuf.hh"
 #include "IMB_imbuf_types.hh"
 
@@ -88,6 +89,7 @@ Main::~Main()
 Main *BKE_main_new()
 {
   Main *bmain = MEM_new<Main>(__func__);
+  IMB_colormanagement_working_space_init_default(bmain);
   return bmain;
 }
 
@@ -123,7 +125,6 @@ void BKE_main_clear(Main &bmain)
 
       switch ((eID_Index)a) {
         CASE_ID_INDEX(INDEX_ID_LI);
-        CASE_ID_INDEX(INDEX_ID_IP);
         CASE_ID_INDEX(INDEX_ID_AC);
         CASE_ID_INDEX(INDEX_ID_GD_LEGACY);
         CASE_ID_INDEX(INDEX_ID_NT);
@@ -472,12 +473,14 @@ bool BKE_main_is_empty(Main *bmain)
 
 bool BKE_main_has_issues(const Main *bmain)
 {
-  return bmain->has_forward_compatibility_issues || bmain->is_asset_edit_file;
+  return bmain->has_forward_compatibility_issues || bmain->is_asset_edit_file ||
+         bmain->colorspace.is_missing_opencolorio_config;
 }
 
 bool BKE_main_needs_overwrite_confirm(const Main *bmain)
 {
-  return bmain->has_forward_compatibility_issues || bmain->is_asset_edit_file;
+  return bmain->has_forward_compatibility_issues || bmain->is_asset_edit_file ||
+         bmain->colorspace.is_missing_opencolorio_config;
 }
 
 void BKE_main_lock(Main *bmain)
@@ -714,7 +717,15 @@ void BKE_main_library_weak_reference_add_item(
   BLI_assert(BKE_idtype_idcode_append_is_reusable(GS(new_id->name)));
 
   const LibWeakRefKey key{library_filepath, library_id_name};
-  library_weak_reference_mapping->map.add_new(key, new_id);
+  /* With packed IDs and archive libraries, it is now possible to have several instances of the
+   * (originally) same linked ID made local at the same time in an append opeeration, so it is
+   * possible to get the same key several time here. And `Map::add_new` cannot be used safely
+   * anymore.
+   *
+   * Simply consider the first added one as valid, there is no good way to determine the 'best' one
+   * to keep around for append-or-reuse operations anyway - and the whole append-and-reuse may be
+   * depracted soon too. */
+  library_weak_reference_mapping->map.add(key, new_id);
 
   BKE_main_library_weak_reference_add(new_id, library_filepath, library_id_name);
 }
@@ -883,6 +894,11 @@ const char *BKE_main_blendfile_path_from_global()
   return BKE_main_blendfile_path(G_MAIN);
 }
 
+const char *BKE_main_blendfile_path_from_library(const Library &library)
+{
+  return library.runtime->filepath_abs;
+}
+
 ListBase *which_libbase(Main *bmain, short type)
 {
   switch ((ID_Type)type) {
@@ -910,8 +926,6 @@ ListBase *which_libbase(Main *bmain, short type)
       return &(bmain->lights);
     case ID_CA:
       return &(bmain->cameras);
-    case ID_IP:
-      return &(bmain->ipo);
     case ID_KE:
       return &(bmain->shapekeys);
     case ID_WO:
@@ -975,8 +989,6 @@ MainListsArray BKE_main_lists_get(Main &bmain)
   MainListsArray lb{};
   /* Libraries may be accessed from pretty much any other ID. */
   lb[INDEX_ID_LI] = &bmain.libraries;
-
-  lb[INDEX_ID_IP] = &bmain.ipo;
 
   /* Moved here to avoid problems when freeing with animato (aligorith). */
   lb[INDEX_ID_AC] = &bmain.actions;

@@ -85,7 +85,6 @@
 #include "BKE_rigidbody.h"
 #include "BKE_shader_fx.h"
 #include "BKE_shrinkwrap.hh"
-#include "BKE_sound.h"
 #include "BKE_tracking.h"
 #include "BKE_world.h"
 
@@ -599,7 +598,6 @@ void DepsgraphRelationBuilder::build_id(ID *id)
       break;
 
     case ID_LI:
-    case ID_IP:
     case ID_SCR:
     case ID_VF:
     case ID_BR:
@@ -1528,6 +1526,16 @@ void DepsgraphRelationBuilder::build_constraints(ID *id,
 
           /* NOTE: obdata eval now doesn't necessarily depend on the
            * object's transform. */
+          ComponentKey target_transform_key(&ct->tar->id, NodeType::TRANSFORM);
+          add_relation(target_transform_key, constraint_op_key, cti->name);
+        }
+        else if (con->type == CONSTRAINT_TYPE_GEOMETRY_ATTRIBUTE) {
+          /* Constraints which require the target object geometry attributes. */
+          ComponentKey target_key(&ct->tar->id, NodeType::GEOMETRY);
+          add_relation(target_key, constraint_op_key, cti->name);
+
+          /* NOTE: The target object's transform is used when the 'Apply target transform' flag
+           * is set.*/
           ComponentKey target_transform_key(&ct->tar->id, NodeType::TRANSFORM);
           add_relation(target_transform_key, constraint_op_key, cti->name);
         }
@@ -3442,6 +3450,21 @@ static bool strip_build_prop_cb(Strip *strip, void *user_data)
     ViewLayer *sequence_view_layer = BKE_view_layer_default_render(strip->scene);
     cd->builder->build_scene_speakers(strip->scene, sequence_view_layer);
   }
+  LISTBASE_FOREACH (StripModifierData *, modifier, &strip->modifiers) {
+    if (modifier->type != eSeqModifierType_Compositor) {
+      continue;
+    }
+
+    const SequencerCompositorModifierData *modifier_data =
+        reinterpret_cast<SequencerCompositorModifierData *>(modifier);
+    if (!modifier_data->node_group) {
+      continue;
+    }
+    cd->builder->build_nodetree(modifier_data->node_group);
+    OperationKey node_tree_key(
+        &modifier_data->node_group->id, NodeType::NTREE_OUTPUT, OperationCode::NTREE_OUTPUT);
+    cd->builder->add_relation(node_tree_key, cd->sequencer_key, "Modifier's Node Group");
+  }
   /* TODO(sergey): Movie clip, camera, mask. */
   return true;
 }
@@ -3464,7 +3487,7 @@ void DepsgraphRelationBuilder::build_scene_sequencer(Scene *scene)
 
   Seq_build_prop_cb_data cb_data = {this, sequencer_key, false};
 
-  seq::for_each_callback(&scene->ed->seqbase, strip_build_prop_cb, &cb_data);
+  seq::foreach_strip(&scene->ed->seqbase, strip_build_prop_cb, &cb_data);
   if (cb_data.has_audio_strips) {
     add_relation(sequencer_key, scene_audio_key, "Sequencer -> Audio");
   }

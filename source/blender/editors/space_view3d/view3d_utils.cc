@@ -27,6 +27,7 @@
 #include "BLI_array_utils.h"
 #include "BLI_bitmap_draw_2d.h"
 #include "BLI_listbase.h"
+#include "BLI_math_color.h"
 #include "BLI_math_geom.h"
 #include "BLI_math_matrix.h"
 #include "BLI_math_rotation.h"
@@ -466,7 +467,7 @@ bool ED_view3d_boundbox_clip_ex(const RegionView3D *rv3d, const BoundBox *bb, fl
     return true;
   }
 
-  mul_m4_m4m4(persmatob, (float(*)[4])rv3d->persmat, obmat);
+  mul_m4_m4m4(persmatob, (float (*)[4])rv3d->persmat, obmat);
 
   return view3d_boundbox_clip_m4(bb, persmatob);
 }

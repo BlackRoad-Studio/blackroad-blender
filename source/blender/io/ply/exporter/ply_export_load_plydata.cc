@@ -96,7 +96,7 @@ static void generate_vertex_map(const Mesh *mesh,
   bool export_uv = false;
   VArraySpan<float2> uv_map;
   if (export_params.export_uv) {
-    const StringRef uv_name = CustomData_get_active_layer_name(&mesh->corner_data, CD_PROP_FLOAT2);
+    const StringRef uv_name = mesh->active_uv_map_name();
     if (!uv_name.is_empty()) {
       const bke::AttributeAccessor attributes = mesh->attributes();
       uv_map = *attributes.lookup<float2>(uv_name, bke::AttrDomain::Corner);
@@ -177,7 +177,7 @@ static void load_custom_attributes(const Mesh *mesh,
 {
   const bke::AttributeAccessor attributes = mesh->attributes();
   const StringRef color_name = mesh->active_color_attribute;
-  const StringRef uv_name = CustomData_get_active_layer_name(&mesh->corner_data, CD_PROP_FLOAT2);
+  const StringRef uv_name = mesh->active_uv_map_name();
   const int64_t size = ply_to_vertex.size();
 
   attributes.foreach_attribute([&](const bke::AttributeIter &iter) {
@@ -271,7 +271,7 @@ static void load_custom_attributes(const Mesh *mesh,
         float *attr_a = find_or_add_attribute(iter.name + "_a", size, vertex_offset, r_attributes);
         auto typed = attribute.typed<ColorGeometry4b>();
         for (const int64_t i : ply_to_vertex.index_range()) {
-          ColorGeometry4f col = typed[ply_to_vertex[i]].decode();
+          ColorGeometry4f col = color::decode(typed[ply_to_vertex[i]]);
           attr_r[i] = col.r;
           attr_g[i] = col.g;
           attr_b[i] = col.b;

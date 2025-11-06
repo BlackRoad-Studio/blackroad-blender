@@ -17,7 +17,7 @@
 #include "BKE_idtype.hh"
 #include "BKE_lib_id.hh"
 #include "BKE_lib_query.hh"
-#include "BKE_speaker.h"
+#include "BKE_speaker.hh"
 
 #include "BLO_read_write.hh"
 
@@ -67,6 +67,7 @@ IDTypeInfo IDType_ID_SPK = {
     /*foreach_id*/ speaker_foreach_id,
     /*foreach_cache*/ nullptr,
     /*foreach_path*/ nullptr,
+    /*foreach_working_space_color*/ nullptr,
     /*owner_pointer_get*/ nullptr,
 
     /*blend_write*/ speaker_blend_write,

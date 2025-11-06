@@ -37,7 +37,7 @@
 #include "BKE_editmesh.hh"
 #include "BKE_fcurve.hh"
 #include "BKE_global.hh"
-#include "BKE_icons.h"
+#include "BKE_icons.hh"
 #include "BKE_layer.hh"
 #include "BKE_lib_id.hh"
 #include "BKE_library.hh"
@@ -47,7 +47,7 @@
 #include "BKE_report.hh"
 #include "BKE_scene.hh"
 #include "BKE_screen.hh"
-#include "BKE_sound.h"
+#include "BKE_sound.hh"
 #include "BKE_workspace.hh"
 
 #include "WM_api.hh"
@@ -945,7 +945,7 @@ static AZone *area_actionzone_refresh_xy(ScrArea *area, const int xy[2], const b
           }
           else {
             const int mouse_sq = square_i(xy[0] - az->x2) + square_i(xy[1] - az->y2);
-            const int spot_sq = square_i(UI_AZONESPOTW);
+            const int spot_sq = square_i(UI_AZONESPOTW_RIGHT);
             const int fadein_sq = square_i(AZONEFADEIN);
             const int fadeout_sq = square_i(AZONEFADEOUT);
 
@@ -1541,8 +1541,11 @@ static void area_dupli_fn(bScreen * /*screen*/, ScrArea *area, void *user_data)
 /* operator callback */
 static bool area_dupli_open(bContext *C, ScrArea *area, const blender::int2 position)
 {
-  const rcti window_rect = {
-      position.x, position.x + area->winx, position.y, position.y + area->winy};
+  const wmWindow *win = CTX_wm_window(C);
+  const rcti window_rect = {win->posx + position.x,
+                            win->posx + position.x + area->winx,
+                            win->posy + position.y,
+                            win->posy + position.y + area->winy};
 
   /* Create new window. No need to set space_type since it will be copied over. */
   wmWindow *newwin = WM_window_open(C,
@@ -1853,6 +1856,7 @@ static bool area_move_init(bContext *C, wmOperator *op)
   /* required properties */
   int x = RNA_int_get(op->ptr, "x");
   int y = RNA_int_get(op->ptr, "y");
+  bool snap_prop = RNA_boolean_get(op->ptr, "snap");
 
   /* setup */
   ScrEdge *actedge = screen_geom_find_active_scredge(win, screen, x, y);
@@ -1891,7 +1895,12 @@ static bool area_move_init(bContext *C, wmOperator *op)
   area_move_set_limits(
       win, screen, md->dir_axis, &md->bigger, &md->smaller, &use_bigger_smaller_snap);
 
-  md->snap_type = use_bigger_smaller_snap ? SNAP_BIGGER_SMALLER_ONLY : SNAP_AREAGRID;
+  if (snap_prop) {
+    md->snap_type = SNAP_FRACTION_AND_ADJACENT;
+  }
+  else {
+    md->snap_type = use_bigger_smaller_snap ? SNAP_BIGGER_SMALLER_ONLY : SNAP_AREAGRID;
+  }
 
   md->screen = screen;
   md->start_time = BLI_time_now_seconds();
@@ -2220,6 +2229,8 @@ static wmOperatorStatus area_move_modal(bContext *C, wmOperator *op, const wmEve
 
 static void SCREEN_OT_area_move(wmOperatorType *ot)
 {
+  PropertyRNA *prop;
+
   /* identifiers */
   ot->name = "Move Area Edges";
   ot->description = "Move selected area edges";
@@ -2238,6 +2249,9 @@ static void SCREEN_OT_area_move(wmOperatorType *ot)
   RNA_def_int(ot->srna, "x", 0, INT_MIN, INT_MAX, "X", "", INT_MIN, INT_MAX);
   RNA_def_int(ot->srna, "y", 0, INT_MIN, INT_MAX, "Y", "", INT_MIN, INT_MAX);
   RNA_def_int(ot->srna, "delta", 0, INT_MIN, INT_MAX, "Delta", "", INT_MIN, INT_MAX);
+
+  prop = RNA_def_boolean(ot->srna, "snap", false, "Snapping", "Enable snapping");
+  RNA_def_property_flag(prop, PROP_SKIP_SAVE);
 }
 
 /** \} */
@@ -2441,7 +2455,7 @@ static bool area_split_apply(bContext *C, wmOperator *op)
   BKE_icon_changed(screen->id.icon_id);
 
   /* We have more than one area now, so reset window title. */
-  WM_window_title(CTX_wm_manager(C), CTX_wm_window(C));
+  WM_window_title_refresh(CTX_wm_manager(C), CTX_wm_window(C));
 
   return true;
 }
@@ -3363,6 +3377,73 @@ static void SCREEN_OT_frame_jump(wmOperatorType *ot)
 /** \} */
 
 /* -------------------------------------------------------------------- */
+/** \name Time Jump Operator
+ * \{ */
+
+/* function to be called outside UI context, or for redo */
+static wmOperatorStatus frame_jump_delta_exec(bContext *C, wmOperator *op)
+{
+  Scene *scene = CTX_wm_space_seq(C) != nullptr ? CTX_data_sequencer_scene(C) : CTX_data_scene(C);
+  const bool backward = RNA_boolean_get(op->ptr, "backward");
+
+  if (scene == nullptr) {
+    return OPERATOR_CANCELLED;
+  }
+
+  float delta = scene->r.time_jump_delta;
+
+  if (scene->r.time_jump_unit == SCE_TIME_JUMP_SECOND) {
+    delta *= scene->r.frs_sec / scene->r.frs_sec_base;
+  }
+
+  int step = (int)delta;
+  float fraction = delta - step;
+  if (backward) {
+    scene->r.cfra -= step;
+    scene->r.subframe -= fraction;
+  }
+  else {
+    scene->r.cfra += step;
+    scene->r.subframe += fraction;
+  }
+
+  /* Check if subframe has a non-fractional component, and roll that into cfra. */
+  if (scene->r.subframe < 0.0f || scene->r.subframe >= 1.0f) {
+    const float subframe_offset = floorf(scene->r.subframe);
+    const int frame_offset = (int)subframe_offset;
+    scene->r.cfra += frame_offset;
+    scene->r.subframe -= subframe_offset;
+  }
+
+  ED_areas_do_frame_follow(C, true);
+  blender::ed::vse::sync_active_scene_and_time_with_scene_strip(*C);
+
+  DEG_id_tag_update(&scene->id, ID_RECALC_FRAME_CHANGE);
+
+  WM_event_add_notifier(C, NC_SCENE | ND_FRAME, scene);
+
+  return OPERATOR_FINISHED;
+}
+
+static void SCREEN_OT_time_jump(wmOperatorType *ot)
+{
+  ot->name = "Jump Time by Delta";
+  ot->description = "Jump forward/backward by a given number of frames or seconds";
+  ot->idname = "SCREEN_OT_time_jump";
+
+  ot->exec = frame_jump_delta_exec;
+
+  ot->poll = operator_screenactive_norender;
+  ot->flag = OPTYPE_UNDO_GROUPED;
+  ot->undo_group = "Frame Change";
+
+  /* rna */
+  RNA_def_boolean(ot->srna, "backward", false, "Backwards", "Jump backwards in time");
+}
+
+/** \} */
+
+/* -------------------------------------------------------------------- */
 /** \name Jump to Key-Frame Operator
  * \{ */
 
@@ -3393,7 +3474,7 @@ static void keylist_from_graph_editor(bContext &C, AnimKeylist &keylist)
       continue;
     }
 
-    const bool use_nla_mapping = true;
+    const bool use_nla_mapping = ANIM_nla_mapping_allowed(ale);
     fcurve_to_keylist(ale->adt, fcu, &keylist, 0, {-FLT_MAX, FLT_MAX}, use_nla_mapping);
   }
 
@@ -3401,10 +3482,9 @@ static void keylist_from_graph_editor(bContext &C, AnimKeylist &keylist)
 }
 
 /* This is used for all editors where a more specific function isn't implemented. */
-static void keylist_fallback_for_keyframe_jump(bContext &C, AnimKeylist &keylist)
+static void keylist_fallback_for_keyframe_jump(bContext &C, Scene *scene, AnimKeylist &keylist)
 {
   bDopeSheet ads = {nullptr};
-  Scene *scene = CTX_data_scene(&C);
 
   /* Speed up dummy dope-sheet context with flags to perform necessary filtering. */
   if ((scene->flag & SCE_KEYS_NO_SELONLY) == 0) {
@@ -3414,6 +3494,12 @@ static void keylist_fallback_for_keyframe_jump(bContext &C, AnimKeylist &keylist
 
   /* populate tree with keyframe nodes */
   scene_to_keylist(&ads, scene, &keylist, 0, {-FLT_MAX, FLT_MAX});
+
+  /* Return early when invoked from sequencer with sequencer scene. Objects may belong to different
+   * scenes and are irrelevant. */
+  if (CTX_wm_space_seq(&C) != nullptr && scene == CTX_data_sequencer_scene(&C)) {
+    return;
+  }
 
   Object *ob = CTX_data_active_object(&C);
   if (ob) {
@@ -3438,7 +3524,7 @@ static void keylist_fallback_for_keyframe_jump(bContext &C, AnimKeylist &keylist
 /* function to be called outside UI context, or for redo */
 static wmOperatorStatus keyframe_jump_exec(bContext *C, wmOperator *op)
 {
-  Scene *scene = CTX_data_scene(C);
+  Scene *scene = CTX_wm_space_seq(C) != nullptr ? CTX_data_sequencer_scene(C) : CTX_data_scene(C);
   const bool next = RNA_boolean_get(op->ptr, "next");
   bool done = false;
 
@@ -3461,7 +3547,7 @@ static wmOperatorStatus keyframe_jump_exec(bContext *C, wmOperator *op)
       break;
 
     default:
-      keylist_fallback_for_keyframe_jump(*C, *keylist);
+      keylist_fallback_for_keyframe_jump(*C, scene, *keylist);
       break;
   }
 
@@ -3509,6 +3595,7 @@ static wmOperatorStatus keyframe_jump_exec(bContext *C, wmOperator *op)
   }
 
   ED_areas_do_frame_follow(C, true);
+  blender::ed::vse::sync_active_scene_and_time_with_scene_strip(*C);
 
   DEG_id_tag_update(&scene->id, ID_RECALC_FRAME_CHANGE);
 
@@ -3676,6 +3763,10 @@ static wmOperatorStatus screen_maximize_area_exec(bContext *C, wmOperator *op)
   }
   else {
     if (!ELEM(screen->state, SCREENNORMAL, SCREENMAXIMIZED)) {
+      return OPERATOR_CANCELLED;
+    }
+    if (BLI_listbase_is_single(&screen->areabase) && screen->state == SCREENNORMAL) {
+      /* SCREENMAXIMIZED is not useful when a singleton. #144740. */
       return OPERATOR_CANCELLED;
     }
     ED_screen_state_toggle(C, CTX_wm_window(C), area, SCREENMAXIMIZED);
@@ -3907,7 +3998,7 @@ static bool area_join_apply(bContext *C, wmOperator *op)
 
   if (BLI_listbase_is_single(&screen->areabase)) {
     /* Areas reduced to just one, so show nicer title. */
-    WM_window_title(CTX_wm_manager(C), CTX_wm_window(C));
+    WM_window_title_refresh(CTX_wm_manager(C), CTX_wm_window(C));
   }
 
   return true;
@@ -4635,10 +4726,10 @@ static wmOperatorStatus area_join_modal(bContext *C, wmOperator *op, const wmEve
 
         /* Areas changed, update window titles. */
         if (jd->win2 && jd->win2 != jd->win1) {
-          WM_window_title(CTX_wm_manager(C), jd->win2);
+          WM_window_title_refresh(CTX_wm_manager(C), jd->win2);
         }
         if (jd->win1 && !jd->close_win) {
-          WM_window_title(CTX_wm_manager(C), jd->win1);
+          WM_window_title_refresh(CTX_wm_manager(C), jd->win1);
         }
 
         const bool do_close_win = jd->close_win;
@@ -5017,6 +5108,7 @@ static void region_quadview_init_rv3d(
     ScrArea *area, ARegion *region, const char viewlock, const char view, const char persp)
 {
   RegionView3D *rv3d = static_cast<RegionView3D *>(region->regiondata);
+  rv3d->rflag &= ~RV3D_WAS_CAMOB;
 
   if (persp == RV3D_CAMOB) {
     ED_view3d_lastview_store(rv3d);
@@ -5580,9 +5672,8 @@ static bool match_region_with_redraws(const ScrArea *area,
     }
   }
   else if (regiontype == RGN_TYPE_HEADER) {
+    /* The Timeline mode of the Dope Sheet shows playback controls in the header. */
     if (spacetype == SPACE_ACTION) {
-      /* The timeline shows the current frame in the header. Other headers
-       * don't need to be updated. */
       SpaceAction *saction = (SpaceAction *)area->spacedata.first;
       return saction->mode == SACTCONT_TIMELINE;
     }
@@ -5841,6 +5932,12 @@ static wmOperatorStatus screen_animation_step_invoke(bContext *C,
   /* Since we follow draw-flags, we can't send notifier but tag regions ourselves. */
   if (depsgraph != nullptr) {
     ED_update_for_newframe(bmain, depsgraph);
+
+    /* Updating the frame, and invoking the frame pre/post hooks, can result in the current timer
+     * being removed. For example, calling `screen.animation_cancel` inside `frame_change_post`. */
+    if (wt->flags & WM_TIMER_TAGGED_FOR_REMOVAL) {
+      return OPERATOR_FINISHED;
+    }
   }
 
   LISTBASE_FOREACH (wmWindow *, window, &wm->windows) {
@@ -5971,74 +6068,83 @@ bScreen *ED_screen_animation_no_scrub(const wmWindowManager *wm)
   return nullptr;
 }
 
-wmOperatorStatus ED_screen_animation_play(bContext *C, int sync, int mode)
+static void stop_playback(bContext *C)
 {
+  Main *bmain = CTX_data_main(C);
+  bScreen *screen = ED_screen_animation_playing(CTX_wm_manager(C));
+  wmTimer *wt = screen->animtimer;
+  ScreenAnimData *sad = static_cast<ScreenAnimData *>(wt->customdata);
+  Scene *scene = sad->scene;
+
+  ViewLayer *view_layer = sad->view_layer;
+  Depsgraph *depsgraph = BKE_scene_ensure_depsgraph(bmain, scene, view_layer);
+  BKE_scene_graph_evaluated_ensure(depsgraph, bmain);
+  Scene *scene_eval = DEG_get_evaluated_scene(depsgraph);
+
+  /* Only stop sound playback, when playing forward, since there is no sound for reverse
+   * playback. */
+  if ((sad->flag & ANIMPLAY_FLAG_REVERSE) == 0) {
+    BKE_sound_stop_scene(scene_eval);
+  }
+
+  ED_screen_animation_timer(C, scene, view_layer, 0, 0, 0);
+  ED_scene_fps_average_clear(scene);
+  BKE_callback_exec_id_depsgraph(bmain, &scene->id, depsgraph, BKE_CB_EVT_ANIMATION_PLAYBACK_POST);
+
+  /* Triggers redraw of sequencer preview so that it does not show to fps anymore after stopping
+   * playback. */
+  WM_event_add_notifier(C, NC_SPACE | ND_SPACE_SEQUENCER, scene);
+  WM_event_add_notifier(C, NC_SPACE | ND_SPACE_SPREADSHEET, scene);
+  WM_event_add_notifier(C, NC_SCENE | ND_TRANSFORM, scene);
+}
+
+static wmOperatorStatus start_playback(bContext *C, int sync, int mode)
+{
+  Main *bmain = CTX_data_main(C);
   bScreen *screen = CTX_wm_screen(C);
+
   const bool is_sequencer = CTX_wm_space_seq(C) != nullptr;
   Scene *scene = is_sequencer ? CTX_data_sequencer_scene(C) : CTX_data_scene(C);
   if (!scene) {
     return OPERATOR_CANCELLED;
   }
-  Main *bmain = CTX_data_main(C);
   ViewLayer *view_layer = is_sequencer ? BKE_view_layer_default_render(scene) :
                                          CTX_data_view_layer(C);
   Depsgraph *depsgraph = is_sequencer ? BKE_scene_ensure_depsgraph(bmain, scene, view_layer) :
                                         CTX_data_ensure_evaluated_depsgraph(C);
+  if (is_sequencer) {
+    BKE_scene_graph_evaluated_ensure(depsgraph, bmain);
+  }
   Scene *scene_eval = DEG_get_evaluated_scene(depsgraph);
 
-  if (ED_screen_animation_playing(CTX_wm_manager(C))) {
-    /* stop playback now */
-    ED_screen_animation_timer(C, scene, view_layer, 0, 0, 0);
-    ED_scene_fps_average_clear(scene);
-    BKE_sound_stop_scene(scene_eval);
+  BKE_callback_exec_id_depsgraph(bmain, &scene->id, depsgraph, BKE_CB_EVT_ANIMATION_PLAYBACK_PRE);
 
-    if (is_sequencer) {
-      /* Stop sound for active scene in window. */
-      BKE_sound_stop_scene(DEG_get_evaluated_scene(CTX_data_ensure_evaluated_depsgraph(C)));
-    }
-    else {
-      /* Stop sound for sequencer scene. */
-      WorkSpace *workspace = CTX_wm_workspace(C);
-      if (workspace->sequencer_scene) {
-        Depsgraph *depsgraph = BKE_scene_ensure_depsgraph(
-            bmain,
-            workspace->sequencer_scene,
-            BKE_view_layer_default_render(workspace->sequencer_scene));
-        Scene *seq_scene_eval = DEG_get_evaluated_scene(depsgraph);
-        BKE_sound_stop_scene(seq_scene_eval);
-      }
-    }
-
-    BKE_callback_exec_id_depsgraph(
-        bmain, &scene->id, depsgraph, BKE_CB_EVT_ANIMATION_PLAYBACK_POST);
-
-    /* Triggers redraw of sequencer preview so that it does not show to fps anymore after stopping
-     * playback. */
-    WM_event_add_notifier(C, NC_SPACE | ND_SPACE_SEQUENCER, scene);
-    WM_event_add_notifier(C, NC_SPACE | ND_SPACE_SPREADSHEET, scene);
-    WM_event_add_notifier(C, NC_SCENE | ND_TRANSFORM, scene);
+  /* Only play sound when playing forward. Reverse sound playback is not implemented. */
+  if (mode == 1) {
+    BKE_sound_play_scene(scene_eval);
   }
-  else {
-    BKE_callback_exec_id_depsgraph(
-        bmain, &scene->id, depsgraph, BKE_CB_EVT_ANIMATION_PLAYBACK_PRE);
 
-    /* these settings are currently only available from a menu in the TimeLine */
-    if (mode == 1) { /* XXX only play audio forwards!? */
-      BKE_sound_play_scene(scene_eval);
-    }
+  ED_screen_animation_timer(C, scene, view_layer, screen->redraws_flag, sync, mode);
+  ED_scene_fps_average_clear(scene);
 
-    ED_screen_animation_timer(C, scene, view_layer, screen->redraws_flag, sync, mode);
-    ED_scene_fps_average_clear(scene);
+  if (screen->animtimer) {
+    wmTimer *wt = screen->animtimer;
+    ScreenAnimData *sad = static_cast<ScreenAnimData *>(wt->customdata);
 
-    if (screen->animtimer) {
-      wmTimer *wt = screen->animtimer;
-      ScreenAnimData *sad = static_cast<ScreenAnimData *>(wt->customdata);
-
-      sad->region = CTX_wm_region(C);
-    }
+    sad->region = CTX_wm_region(C);
   }
 
   return OPERATOR_FINISHED;
+}
+
+wmOperatorStatus ED_screen_animation_play(bContext *C, int sync, int mode)
+{
+  if (ED_screen_animation_playing(CTX_wm_manager(C))) {
+    stop_playback(C);
+    return OPERATOR_FINISHED;
+  }
+
+  return start_playback(C, sync, mode);
 }
 
 static wmOperatorStatus screen_animation_play_exec(bContext *C, wmOperator *op)
@@ -6236,12 +6342,6 @@ static void SCREEN_OT_back_to_previous(wmOperatorType *ot)
 
 static wmOperatorStatus userpref_show_exec(bContext *C, wmOperator *op)
 {
-  wmWindow *win_cur = CTX_wm_window(C);
-  /* Use eventstate, not event from _invoke, so this can be called through exec(). */
-  const wmEvent *event = win_cur->eventstate;
-  int sizex = (680 + UI_NAVIGATION_REGION_WIDTH) * UI_SCALE_FAC;
-  int sizey = 520 * UI_SCALE_FAC;
-
   PropertyRNA *prop = RNA_struct_find_property(op->ptr, "section");
   if (prop && RNA_property_is_set(op->ptr, prop)) {
     /* Set active section via RNA, so it can fail properly. */
@@ -6253,16 +6353,9 @@ static wmOperatorStatus userpref_show_exec(bContext *C, wmOperator *op)
     RNA_property_update(C, &pref_ptr, active_section_prop);
   }
 
-  const rcti window_rect = {
-      /*xmin*/ event->xy[0],
-      /*xmax*/ event->xy[0] + sizex,
-      /*ymin*/ event->xy[1],
-      /*ymax*/ event->xy[1] + sizey,
-  };
-
   /* changes context! */
   if (ScrArea *area = ED_screen_temp_space_open(
-          C, nullptr, &window_rect, SPACE_USERPREF, U.preferences_display_type, false))
+          C, nullptr, SPACE_USERPREF, U.preferences_display_type, false))
   {
     /* The header only contains the editor switcher and looks empty.
      * So hiding in the temp window makes sense. */
@@ -6324,13 +6417,6 @@ static void SCREEN_OT_userpref_show(wmOperatorType *ot)
 
 static wmOperatorStatus drivers_editor_show_exec(bContext *C, wmOperator *op)
 {
-  wmWindow *win_cur = CTX_wm_window(C);
-  /* Use eventstate, not event from _invoke, so this can be called through exec(). */
-  const wmEvent *event = win_cur->eventstate;
-
-  int sizex = 900 * UI_SCALE_FAC;
-  int sizey = 580 * UI_SCALE_FAC;
-
   /* Get active property to show driver for
    * - Need to grab it first, or else this info disappears
    *   after we've created the window
@@ -6340,25 +6426,8 @@ static wmOperatorStatus drivers_editor_show_exec(bContext *C, wmOperator *op)
   PropertyRNA *prop;
   uiBut *but = UI_context_active_but_prop_get(C, &ptr, &prop, &index);
 
-  const rcti window_rect = {
-      /*xmin*/ event->xy[0],
-      /*xmax*/ event->xy[0] + sizex,
-      /*ymin*/ event->xy[1],
-      /*ymax*/ event->xy[1] + sizey,
-  };
-
   /* changes context! */
-  if (WM_window_open(C,
-                     IFACE_("Blender Drivers Editor"),
-                     &window_rect,
-                     SPACE_GRAPH,
-                     false,
-                     false,
-                     true,
-                     WIN_ALIGN_LOCATION_CENTER,
-                     nullptr,
-                     nullptr) != nullptr)
-  {
+  if (WM_window_open_temp(C, IFACE_("Blender Drivers Editor"), SPACE_GRAPH, false)) {
     ED_drivers_editor_init(C, CTX_wm_area(C));
 
     /* activate driver F-Curve for the property under the cursor */
@@ -6414,34 +6483,8 @@ static void SCREEN_OT_drivers_editor_show(wmOperatorType *ot)
 
 static wmOperatorStatus info_log_show_exec(bContext *C, wmOperator *op)
 {
-  wmWindow *win_cur = CTX_wm_window(C);
-  /* Use eventstate, not event from _invoke, so this can be called through exec(). */
-  const wmEvent *event = win_cur->eventstate;
-  const int shift_y = 480;
-  const int mx = event->xy[0];
-  const int my = event->xy[1] + shift_y;
-  int sizex = 900 * UI_SCALE_FAC;
-  int sizey = 580 * UI_SCALE_FAC;
-
-  const rcti window_rect = {
-      /*xmin*/ mx,
-      /*xmax*/ mx + sizex,
-      /*ymin*/ my,
-      /*ymax*/ my + sizey,
-  };
-
   /* changes context! */
-  if (WM_window_open(C,
-                     IFACE_("Blender Info Log"),
-                     &window_rect,
-                     SPACE_INFO,
-                     false,
-                     false,
-                     true,
-                     WIN_ALIGN_LOCATION_CENTER,
-                     nullptr,
-                     nullptr) != nullptr)
-  {
+  if (WM_window_open_temp(C, IFACE_("Blender Info Log"), SPACE_INFO, false)) {
     return OPERATOR_FINISHED;
   }
   BKE_report(op->reports, RPT_ERROR, "Failed to open window!");
@@ -6939,6 +6982,7 @@ void ED_operatortypes_screen()
   /* Frame changes. */
   WM_operatortype_append(SCREEN_OT_frame_offset);
   WM_operatortype_append(SCREEN_OT_frame_jump);
+  WM_operatortype_append(SCREEN_OT_time_jump);
   WM_operatortype_append(SCREEN_OT_keyframe_jump);
   WM_operatortype_append(SCREEN_OT_marker_jump);
 
@@ -7019,6 +7063,8 @@ static std::string screen_drop_scene_tooltip(bContext * /*C*/,
     switch (asset_drag->import_settings.method) {
       case ASSET_IMPORT_LINK:
         return fmt::format(fmt::runtime(TIP_("Link {}")), dragged_scene_name);
+      case ASSET_IMPORT_PACK:
+        return fmt::format(fmt::runtime(TIP_("Pack {}")), dragged_scene_name);
       case ASSET_IMPORT_APPEND:
         return fmt::format(fmt::runtime(TIP_("Append {}")), dragged_scene_name);
       case ASSET_IMPORT_APPEND_REUSE:

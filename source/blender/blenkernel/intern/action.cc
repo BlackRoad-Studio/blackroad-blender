@@ -256,7 +256,6 @@ static void action_foreach_id(ID *id, LibraryForeachIDData *data)
    * NOTE: early-returns by BKE_LIB_FOREACHID_PROCESS_... macros are forbidden in non-readonly
    * cases (see #IDWALK_RET_STOP_ITER documentation). */
 
-  const LibraryForeachIDFlag flag = BKE_lib_query_foreachid_process_flags_get(data);
   constexpr LibraryForeachIDCallbackFlag idwalk_flags = IDWALK_CB_NEVER_SELF | IDWALK_CB_LOOPBACK;
 
   /* Note that `bmain` can be `nullptr`. An example is in
@@ -291,6 +290,7 @@ static void action_foreach_id(ID *id, LibraryForeachIDData *data)
     }
 
 #ifndef NDEBUG
+    const LibraryForeachIDFlag flag = BKE_lib_query_foreachid_process_flags_get(data);
     const bool is_readonly = flag & IDWALK_READONLY;
     if (is_readonly) {
       BLI_assert_msg(!should_invalidate,
@@ -305,16 +305,6 @@ static void action_foreach_id(ID *id, LibraryForeachIDData *data)
 
   LISTBASE_FOREACH (TimeMarker *, marker, &action.markers) {
     BKE_LIB_FOREACHID_PROCESS_IDSUPER(data, marker->camera, IDWALK_CB_NOP);
-  }
-
-  /* Legacy IPO curves. */
-  if (flag & IDWALK_DO_DEPRECATED_POINTERS) {
-    LISTBASE_FOREACH (bActionChannel *, chan, &action.chanbase) {
-      BKE_LIB_FOREACHID_PROCESS_ID_NOCHECK(data, chan->ipo, IDWALK_CB_USER);
-      LISTBASE_FOREACH (bConstraintChannel *, chan_constraint, &chan->constraintChannels) {
-        BKE_LIB_FOREACHID_PROCESS_ID_NOCHECK(data, chan_constraint->ipo, IDWALK_CB_USER);
-      }
-    }
   }
 }
 
@@ -698,10 +688,6 @@ static void action_blend_read_data(BlendDataReader *reader, ID *id)
     BLI_listbase_clear(&action.curves);
     BLI_listbase_clear(&action.groups);
 
-    /* Should never be stored as part of the forward-compatible data in a
-     * layered action, and thus should always be empty here. */
-    BLI_assert(BLI_listbase_is_empty(&action.chanbase));
-
     /* Layered actions should always have `idroot == 0`, but when writing an
      * action to a blend file `idroot` is typically set otherwise for forward
      * compatibility reasons (see `action_blend_write()`). So we set it to zero
@@ -710,14 +696,8 @@ static void action_blend_read_data(BlendDataReader *reader, ID *id)
   }
   else {
     /* Read legacy data. */
-    BLO_read_struct_list(reader, bActionChannel, &action.chanbase);
     BLO_read_struct_list(reader, FCurve, &action.curves);
     BLO_read_struct_list(reader, bActionGroup, &action.groups);
-
-    LISTBASE_FOREACH (bActionChannel *, achan, &action.chanbase) {
-      BLO_read_struct(reader, bActionGroup, &achan->grp);
-      BLO_read_struct_list(reader, bConstraintChannel, &achan->constraintChannels);
-    }
 
     BKE_fcurve_blend_read_data_listbase(reader, &action.curves);
 
@@ -782,6 +762,7 @@ IDTypeInfo IDType_ID_AC = {
     /*foreach_id*/ blender::bke::action_foreach_id,
     /*foreach_cache*/ nullptr,
     /*foreach_path*/ nullptr,
+    /*foreach_working_space_color*/ nullptr,
     /*owner_pointer_get*/ nullptr,
 
     /*blend_write*/ blender::bke::action_blend_write,
@@ -1417,6 +1398,46 @@ bool BKE_pose_channel_in_IK_chain(Object *ob, bPoseChannel *pchan)
   return pose_channel_in_IK_chain(ob, pchan, 0);
 }
 
+static bool transform_follows_custom_tx(const bArmature *arm, const bPoseChannel *pchan)
+{
+  if (arm->flag & ARM_NO_CUSTOM) {
+    return false;
+  }
+
+  if (!pchan->custom || !pchan->custom_tx) {
+    return false;
+  }
+
+  return pchan->flag & POSE_TRANSFORM_AT_CUSTOM_TX;
+}
+
+void BKE_pose_channel_transform_orientation(const bArmature *arm,
+                                            const bPoseChannel *pose_bone,
+                                            float r_pose_orientation[3][3])
+{
+  if (!transform_follows_custom_tx(arm, pose_bone)) {
+    copy_m3_m4(r_pose_orientation, pose_bone->pose_mat);
+    return;
+  }
+
+  BLI_assert(pose_bone->custom_tx);
+
+  const bPoseChannel *custom_tx_bone = pose_bone->custom_tx;
+  copy_m3_m4(r_pose_orientation, custom_tx_bone->pose_mat);
+}
+
+void BKE_pose_channel_transform_location(const bArmature *arm,
+                                         const bPoseChannel *pose_bone,
+                                         float r_pose_space_pivot[3])
+{
+  if (!transform_follows_custom_tx(arm, pose_bone)) {
+    copy_v3_v3(r_pose_space_pivot, pose_bone->pose_mat[3]);
+    return;
+  }
+
+  copy_v3_v3(r_pose_space_pivot, pose_bone->custom_tx->pose_mat[3]);
+}
+
 void BKE_pose_channels_hash_ensure(bPose *pose)
 {
   if (!pose->chanhash) {
@@ -1858,8 +1879,7 @@ void BKE_pose_rest(bPose *pose, bool selected_bones_only)
   memset(pose->cyclic_offset, 0, sizeof(pose->cyclic_offset));
 
   LISTBASE_FOREACH (bPoseChannel *, pchan, &pose->chanbase) {
-    if (selected_bones_only && pchan->bone != nullptr && (pchan->bone->flag & BONE_SELECTED) == 0)
-    {
+    if (selected_bones_only && pchan->bone != nullptr && (pchan->flag & POSE_SELECTED) == 0) {
       continue;
     }
     zero_v3(pchan->loc);
@@ -2068,10 +2088,10 @@ void BKE_pose_check_uids_unique_and_report(const bPose *pose)
   BLI_gset_free(used_uids, nullptr);
 }
 
-void BKE_pose_blend_write(BlendWriter *writer, bPose *pose, bArmature *arm)
+void BKE_pose_blend_write(BlendWriter *writer, bPose *pose)
 {
 #ifndef __GNUC__
-  BLI_assert(pose != nullptr && arm != nullptr);
+  BLI_assert(pose != nullptr);
 #endif
 
   /* Write channels */
@@ -2088,17 +2108,6 @@ void BKE_pose_blend_write(BlendWriter *writer, bPose *pose, bArmature *arm)
     BKE_constraint_blend_write(writer, &chan->constraints);
 
     animviz_motionpath_blend_write(writer, chan->mpath);
-
-    /* Prevent crashes with auto-save,
-     * when a bone duplicated in edit-mode has not yet been assigned to its pose-channel.
-     * Also needed with memundo, in some cases we can store a step before pose has been
-     * properly rebuilt from previous undo step. */
-    Bone *bone = (pose->flag & POSE_RECALC) ? BKE_armature_find_bone_name(arm, chan->name) :
-                                              chan->bone;
-    if (bone != nullptr) {
-      /* gets restored on read, for library armatures */
-      chan->selectflag = bone->flag & BONE_SELECTED;
-    }
 
     BLO_write_struct(writer, bPoseChannel, chan);
   }
@@ -2198,11 +2207,6 @@ void BKE_pose_blend_read_after_liblink(BlendLibReader *reader, Object *ob, bPose
 
     if (UNLIKELY(pchan->bone == nullptr)) {
       rebuild = true;
-    }
-    else if (!ID_IS_LINKED(ob) && ID_IS_LINKED(arm)) {
-      /* local pose selection copied to armature, bit hackish */
-      pchan->bone->flag &= ~BONE_SELECTED;
-      pchan->bone->flag |= pchan->selectflag;
     }
 
     /* At some point in history, bones could have an armature object as custom shape, which caused

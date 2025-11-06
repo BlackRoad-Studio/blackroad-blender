@@ -61,34 +61,40 @@ static PyObject *Color_to_tuple_ex(ColorObject *self, int ndigits)
 /** \name Color Type: `__new__` / `mathutils.Color()`
  * \{ */
 
-static PyObject *Color_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
+static PyObject *Color_vectorcall(PyObject *type,
+                                  PyObject *const *args,
+                                  const size_t nargsf,
+                                  PyObject *kwnames)
 {
-  float col[3] = {0.0f, 0.0f, 0.0f};
-
-  if (kwds && PyDict_Size(kwds)) {
+  if (UNLIKELY(kwnames && PyDict_Size(kwnames))) {
     PyErr_SetString(PyExc_TypeError,
                     "mathutils.Color(): "
                     "takes no keyword args");
     return nullptr;
   }
 
-  switch (PyTuple_GET_SIZE(args)) {
-    case 0:
+  float col[3] = {0.0f, 0.0f, 0.0f};
+
+  const size_t nargs = PyVectorcall_NARGS(nargsf);
+  switch (nargs) {
+    case 0: {
       break;
-    case 1:
-      if (mathutils_array_parse(
-              col, COLOR_SIZE, COLOR_SIZE, PyTuple_GET_ITEM(args, 0), "mathutils.Color()") == -1)
-      {
+    }
+    case 1: {
+      if (mathutils_array_parse(col, COLOR_SIZE, COLOR_SIZE, args[0], "mathutils.Color()") == -1) {
         return nullptr;
       }
       break;
-    default:
-      PyErr_SetString(PyExc_TypeError,
-                      "mathutils.Color(): "
-                      "more than a single arg given");
+    }
+    default: {
+      PyErr_Format(PyExc_TypeError,
+                   "mathutils.Color(): "
+                   "takes at most 1 argument (%zd given)",
+                   nargs);
       return nullptr;
+    }
   }
-  return Color_CreatePyObject(col, type);
+  return Color_CreatePyObject(col, (PyTypeObject *)type);
 }
 
 /** \} */
@@ -197,6 +203,38 @@ static PyObject *Color_from_aces_to_scene_linear(ColorObject *self)
 
 PyDoc_STRVAR(
     /* Wrap. */
+    Color_from_scene_linear_to_acescg_doc,
+    ".. function:: from_scene_linear_to_acescg()\n"
+    "\n"
+    "   Convert from scene linear to ACEScg linear color space.\n"
+    "\n"
+    "   :return: A color in ACEScg linear color space.\n"
+    "   :rtype: :class:`Color`\n");
+static PyObject *Color_from_scene_linear_to_acescg(ColorObject *self)
+{
+  float col[3];
+  IMB_colormanagement_scene_linear_to_acescg(col, self->col);
+  return Color_CreatePyObject(col, Py_TYPE(self));
+}
+
+PyDoc_STRVAR(
+    /* Wrap. */
+    Color_from_acescg_to_scene_linear_doc,
+    ".. function:: from_acescg_to_scene_linear()\n"
+    "\n"
+    "   Convert from ACEScg linear to scene linear color space.\n"
+    "\n"
+    "   :return: A color in scene linear color space.\n"
+    "   :rtype: :class:`Color`\n");
+static PyObject *Color_from_acescg_to_scene_linear(ColorObject *self)
+{
+  float col[3];
+  IMB_colormanagement_acescg_to_scene_linear(col, self->col);
+  return Color_CreatePyObject(col, Py_TYPE(self));
+}
+
+PyDoc_STRVAR(
+    /* Wrap. */
     Color_from_scene_linear_to_rec709_linear_doc,
     ".. function:: from_scene_linear_to_rec709_linear()\n"
     "\n"
@@ -224,6 +262,38 @@ static PyObject *Color_from_rec709_linear_to_scene_linear(ColorObject *self)
 {
   float col[3];
   IMB_colormanagement_rec709_to_scene_linear(col, self->col);
+  return Color_CreatePyObject(col, Py_TYPE(self));
+}
+
+PyDoc_STRVAR(
+    /* Wrap. */
+    Color_from_scene_linear_to_rec2020_linear_doc,
+    ".. function:: from_scene_linear_to_rec2020_linear()\n"
+    "\n"
+    "   Convert from scene linear to Rec.2020 linear color space.\n"
+    "\n"
+    "   :return: A color in Rec.2020 linear color space.\n"
+    "   :rtype: :class:`Color`\n");
+static PyObject *Color_from_scene_linear_to_rec2020_linear(ColorObject *self)
+{
+  float col[3];
+  IMB_colormanagement_scene_linear_to_rec2020(col, self->col);
+  return Color_CreatePyObject(col, Py_TYPE(self));
+}
+
+PyDoc_STRVAR(
+    /* Wrap. */
+    Color_from_rec2020_linear_to_scene_linear_doc,
+    ".. function:: from_rec2020_linear_to_scene_linear()\n"
+    "\n"
+    "   Convert from Rec.2020 linear color space to scene linear color space.\n"
+    "\n"
+    "   :return: A color in scene linear color space.\n"
+    "   :rtype: :class:`Color`\n");
+static PyObject *Color_from_rec2020_linear_to_scene_linear(ColorObject *self)
+{
+  float col[3];
+  IMB_colormanagement_rec2020_to_scene_linear(col, self->col);
   return Color_CreatePyObject(col, Py_TYPE(self));
 }
 
@@ -379,22 +449,25 @@ static PyObject *Color_richcmpr(PyObject *a, PyObject *b, int op)
   }
 
   switch (op) {
-    case Py_NE:
+    case Py_NE: {
       ok = !ok;
       ATTR_FALLTHROUGH;
-    case Py_EQ:
+    }
+    case Py_EQ: {
       res = ok ? Py_False : Py_True;
       break;
-
+    }
     case Py_LT:
     case Py_LE:
     case Py_GT:
-    case Py_GE:
+    case Py_GE: {
       res = Py_NotImplemented;
       break;
-    default:
+    }
+    default: {
       PyErr_BadArgument();
       return nullptr;
+    }
   }
 
   return Py_NewRef(res);
@@ -1220,6 +1293,14 @@ static PyMethodDef Color_methods[] = {
      (PyCFunction)Color_from_aces_to_scene_linear,
      METH_NOARGS,
      Color_from_aces_to_scene_linear_doc},
+    {"from_scene_linear_to_acescg",
+     (PyCFunction)Color_from_scene_linear_to_acescg,
+     METH_NOARGS,
+     Color_from_scene_linear_to_acescg_doc},
+    {"from_acescg_to_scene_linear",
+     (PyCFunction)Color_from_acescg_to_scene_linear,
+     METH_NOARGS,
+     Color_from_acescg_to_scene_linear_doc},
     {"from_scene_linear_to_rec709_linear",
      (PyCFunction)Color_from_scene_linear_to_rec709_linear,
      METH_NOARGS,
@@ -1228,6 +1309,14 @@ static PyMethodDef Color_methods[] = {
      (PyCFunction)Color_from_rec709_linear_to_scene_linear,
      METH_NOARGS,
      Color_from_rec709_linear_to_scene_linear_doc},
+    {"from_scene_linear_to_rec2020_linear",
+     (PyCFunction)Color_from_scene_linear_to_rec2020_linear,
+     METH_NOARGS,
+     Color_from_scene_linear_to_rec2020_linear_doc},
+    {"from_rec2020_linear_to_scene_linear",
+     (PyCFunction)Color_from_rec2020_linear_to_scene_linear,
+     METH_NOARGS,
+     Color_from_rec2020_linear_to_scene_linear_doc},
 #endif /* !MATH_STANDALONE */
 
     {nullptr, nullptr, 0, nullptr},
@@ -1302,7 +1391,7 @@ PyTypeObject color_Type = {
     /*tp_dictoffset*/ 0,
     /*tp_init*/ nullptr,
     /*tp_alloc*/ nullptr,
-    /*tp_new*/ Color_new,
+    /*tp_new*/ nullptr,
     /*tp_free*/ nullptr,
     /*tp_is_gc*/ (inquiry)BaseMathObject_is_gc,
     /*tp_bases*/ nullptr,
@@ -1313,7 +1402,7 @@ PyTypeObject color_Type = {
     /*tp_del*/ nullptr,
     /*tp_version_tag*/ 0,
     /*tp_finalize*/ nullptr,
-    /*tp_vectorcall*/ nullptr,
+    /*tp_vectorcall*/ Color_vectorcall,
 };
 
 #ifdef MATH_STANDALONE

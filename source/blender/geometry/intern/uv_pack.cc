@@ -168,7 +168,7 @@ void PackIsland::add_polygon(const Span<float2> uvs, MemArena *arena, Heap *heap
   /* Storage. */
   uint(*tris)[3] = static_cast<uint(*)[3]>(
       BLI_memarena_alloc(arena, sizeof(*tris) * size_t(nfilltri)));
-  const float(*source)[2] = reinterpret_cast<const float(*)[2]>(uvs.data());
+  const float (*source)[2] = reinterpret_cast<const float (*)[2]>(uvs.data());
 
   /* Triangulate. */
   BLI_polyfill_calc_arena(source, vert_count, 0, tris, arena);
@@ -1782,7 +1782,7 @@ static int64_t pack_island_xatlas(const Span<std::unique_ptr<UVAABBIsland>> isla
  * \param margin: Add `margin` units around islands before packing.
  * \param params: Additional parameters. Scale and margin information is ignored.
  * \param r_phis: Island layout information will be written here.
- * \return Size of square covering the resulting packed UVs. The maximum `u` or `v` co-ordinate.
+ * \return Size of square covering the resulting packed UVs. The maximum `u` or `v` coordinate.
  */
 static float pack_islands_scale_margin(const Span<PackIsland *> islands,
                                        const float scale,

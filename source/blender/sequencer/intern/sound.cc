@@ -23,7 +23,7 @@
 #include "BLI_utildefines.h"
 
 #include "BKE_colortools.hh"
-#include "BKE_sound.h"
+#include "BKE_sound.hh"
 
 #ifdef WITH_CONVOLUTION
 #  include "AUD_Sound.h"
@@ -184,7 +184,10 @@ EQCurveMappingData *sound_equalizer_add(SoundEqualizerModifierData *semd, float 
   clipr.ymin = 0.0;
   clipr.ymax = 0.0;
 
-  BKE_curvemap_reset(&eqcmd->curve_mapping.cm[0], &clipr, CURVE_PRESET_CONSTANT_MEDIAN, 0);
+  BKE_curvemap_reset(&eqcmd->curve_mapping.cm[0],
+                     &clipr,
+                     CURVE_PRESET_CONSTANT_MEDIAN,
+                     CurveMapSlopeType::Negative);
 
   BLI_addtail(&semd->graphics, eqcmd);
 

@@ -307,7 +307,7 @@ DEPS_CRITICAL_SUBPACKAGES = (
 )
 
 
-# Basic mandatory set of common libraries to build Blender, which are also available as pre-conmpiled libraries.
+# Basic mandatory set of common libraries to build Blender, which are also available as pre-compiled libraries.
 DEPS_MANDATORY_SUBPACKAGES = (
     Package(name="JPEG Library",
             distro_package_names={DISTRO_ID_DEBIAN: "libjpeg-dev",
@@ -403,7 +403,7 @@ DEPS_MANDATORY_SUBPACKAGES = (
 )
 
 
-# Basic optional set of common libraries to build Blender, which are also available as pre-conmpiled libraries.
+# Basic optional set of common libraries to build Blender, which are also available as pre-compiled libraries.
 DEPS_OPTIONAL_SUBPACKAGES = (
     Package(name="OpenJPG Library",
             distro_package_names={DISTRO_ID_DEBIAN: "libopenjp2-7-dev",
@@ -1254,10 +1254,11 @@ class PackageInstaller:
             if package.is_mandatory:
                 self.settings.logger.critical(
                     f"\tFailed to find a matching mandatory {package_distro_name} "
-                    f"(withing versions range [{package.version_min}, {package.version_mex}[).")
+                    f"(within versions range [{package.version_min}, {package.version_mex}[).")
                 exit(1)
-            self.settings.logger.warning(f"\tFailed to find a matching {package_distro_name} "
-                                         f"(withing versions range [{package.version_min}, {package.version_mex}[).")
+            self.settings.logger.warning(
+                f"\tFailed to find a matching {package_distro_name} "
+                f"(within versions range [{package.version_min}, {package.version_mex}[).")
             return False
 
         if self._install_command is ...:
@@ -1441,7 +1442,7 @@ class PackageInstallerFedora(PackageInstaller):
         return self.package_version_get([MAYSUDO, "dnf", "info", "--installed", package_distro_name])
 
     def package_query_version_get_impl(self, package_distro_name):
-        return self.package_version_get([MAYSUDO, "dnf", "info", "--all", package_distro_name])
+        return self.package_version_get([MAYSUDO, "dnf", "info", package_distro_name])
 
     def package_name_version_gen(
             self,

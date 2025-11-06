@@ -133,7 +133,14 @@ class Array {
   {
     BLI_assert(size >= 0);
     data_ = this->get_buffer_for_size(size);
+#if defined(__GNUC__) && !defined(__clang__)
+#  pragma GCC diagnostic push
+#  pragma GCC diagnostic ignored "-Warray-bounds"
+#endif
     uninitialized_fill_n(data_, size, value);
+#if defined(__GNUC__) && !defined(__clang__)
+#  pragma GCC diagnostic pop
+#endif
     size_ = size;
   }
 
@@ -353,6 +360,16 @@ class Array {
   IndexRange index_range() const
   {
     return IndexRange(size_);
+  }
+
+  uint64_t hash() const
+  {
+    return this->as_span().hash();
+  }
+
+  static uint64_t hash_as(const Span<T> values)
+  {
+    return values.hash();
   }
 
   friend bool operator==(const Array &a, const Array &b)
