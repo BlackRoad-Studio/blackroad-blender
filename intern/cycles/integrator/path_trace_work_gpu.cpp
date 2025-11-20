@@ -347,6 +347,8 @@ bool PathTraceWorkGPU::update_queue_counter_and_cache()
     device_->update_image_cache();
     queue_counter->cache_miss = 0;
     queue_->copy_to_device(integrator_queue_counter_);
+    /* TODO: this is expensive but needed to update image_info. */
+    queue_->init_execution();
   }
 
   return true;
