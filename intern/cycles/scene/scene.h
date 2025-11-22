@@ -72,8 +72,12 @@ class SceneParams {
   int hair_subdivisions;
   CurveShapeType hair_shape;
   int texture_limit;
+
+  /* Use tx files if they exist. */
   bool use_texture_cache = true;
+  /* Auto generate tx files. */
   bool auto_texture_cache = false;
+  /* Relative (to the image file) or absolute directory for auto generating tx files. */
   std::string texture_cache_path;
 
   bool background;

@@ -749,8 +749,6 @@ void ImageManager::device_update_image_requested(Device *device, Scene *scene, I
       }
     }
   }
-
-  img->loader->drop_file_handle();
 }
 
 void ImageManager::device_load_image(Device *device,

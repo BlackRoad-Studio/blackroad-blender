@@ -47,6 +47,7 @@ set(SRC_HEADERS
   array.h
   atomic.h
   boundbox.h
+  cache_limiter.h
   color.h
   colorspace.h
   concurrent_set.h

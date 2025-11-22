@@ -6,6 +6,7 @@
 
 #include "scene/image.h"
 
+#include "util/cache_limiter.h"
 #include "util/image.h"
 #include "util/string.h"
 #include "util/thread.h"
@@ -39,8 +40,6 @@ class OIIOImageLoader : public ImageLoader {
                         const ExtensionType extension,
                         uint8_t *pixels) override;
 
-  void drop_file_handle() override;
-
   string name() const override;
 
   bool equals(const ImageLoader &other) const override;
@@ -50,9 +49,8 @@ class OIIOImageLoader : public ImageLoader {
 
   string original_filepath;
   string texture_cache_filepath;
-  unique_ptr<ImageInput> filehandle;
-  thread_mutex mutex;
-  bool filehandle_failed = false;
+  CacheHandle<ImageInput> texture_cache_file_handle;
+  bool texture_cache_file_handle_failed = false;
 };
 
 CCL_NAMESPACE_END

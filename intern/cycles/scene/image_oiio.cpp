@@ -15,9 +15,13 @@
 #include "util/types_base.h"
 #include "util/unique_ptr.h"
 
-#include <OpenImageIO/filesystem.h>
-
 CCL_NAMESPACE_BEGIN
+
+/* File handle cache limiter. This is shared across multiple Cycles instances as
+ * the limit we risk running into is per process.
+ *
+ * TODO: Don't hardcode this limit, auto guess based on system + reasonable headroom?. */
+static CacheLimiter<ImageInput> cache_limiter_image_input(128);
 
 OIIOImageLoader::OIIOImageLoader(const string &filepath) : original_filepath(filepath) {}
 
@@ -334,40 +338,45 @@ bool OIIOImageLoader::load_pixels_tile(const ImageMetaData &metadata,
 {
   assert(metadata.tile_size != 0);
 
-  if (filehandle_failed) {
+  /* Don't keep retrying files that failed to open once. */
+  if (texture_cache_file_handle_failed) {
     return false;
   }
-  if (!filehandle) {
-    thread_scoped_lock lock(mutex);
-    if (filehandle_failed) {
-      return false;
-    }
-    if (!filehandle) {
-      const string &filepath = get_filepath();
-      unique_ptr<ImageInput> in = unique_ptr<ImageInput>(ImageInput::create(filepath));
-      if (!in) {
-        filehandle_failed = true;
-        return false;
-      }
 
-      ImageSpec spec = ImageSpec();
-      ImageSpec config;
-      config.attribute("oiio:UnassociatedAlpha", 1);
+  /* Create cached file handle if it was not created yet or it was deleted by the cache limiter.
+   *
+   * TODO: When we know we are going to call load_pixels_tile multiple times,
+   * make this more efficient by keeping the handle around? */
+  CacheHandleUser<ImageInput> file_handle_user = texture_cache_file_handle.acquire(
+      cache_limiter_image_input, [&]() {
+        const string &filepath = get_filepath();
+        unique_ptr<ImageInput> in = unique_ptr<ImageInput>(ImageInput::create(filepath));
+        if (!in) {
+          texture_cache_file_handle_failed = true;
+          return std::unique_ptr<ImageInput>();
+        }
 
-      if (!in->open(filepath, spec, config)) {
-        filehandle_failed = true;
-        return false;
-      }
+        ImageSpec spec = ImageSpec();
+        ImageSpec config;
+        config.attribute("oiio:UnassociatedAlpha", 1);
 
-      filehandle = std::move(in);
-    }
+        if (!in->open(filepath, spec, config)) {
+          texture_cache_file_handle_failed = true;
+          return std::unique_ptr<ImageInput>();
+        }
+
+        return in;
+      });
+
+  if (texture_cache_file_handle_failed) {
+    return false;
   }
 
   const int64_t width = divide_up(metadata.width, 1 << miplevel);
   const int64_t height = divide_up(metadata.height, 1 << miplevel);
 
   /* Load center pixels. */
-  bool ok = oiio_load_pixels_tile(filehandle,
+  bool ok = oiio_load_pixels_tile(file_handle_user.get(),
                                   metadata,
                                   height,
                                   miplevel,
@@ -386,7 +395,7 @@ bool OIIOImageLoader::load_pixels_tile(const ImageMetaData &metadata,
         if (i == 0 && j == 0) {
           continue;
         }
-        ok &= oiio_load_pixels_tile_adjacent(filehandle,
+        ok &= oiio_load_pixels_tile_adjacent(file_handle_user.get(),
                                              metadata,
                                              width,
                                              height,
@@ -407,11 +416,6 @@ bool OIIOImageLoader::load_pixels_tile(const ImageMetaData &metadata,
   }
 
   return ok;
-}
-
-void OIIOImageLoader::drop_file_handle()
-{
-  filehandle.reset();
 }
 
 string OIIOImageLoader::name() const

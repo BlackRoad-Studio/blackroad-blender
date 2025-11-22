@@ -96,9 +96,6 @@ class ImageLoader {
     return false;
   }
 
-  /* TODO: Drop file handle to avoid running out. */
-  virtual void drop_file_handle() {}
-
   /* Name for logs and stats. */
   virtual string name() const = 0;
 
