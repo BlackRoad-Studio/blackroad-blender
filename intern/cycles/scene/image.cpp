@@ -532,7 +532,6 @@ void ImageManager::device_copy_image_textures(Device *device, Scene *scene)
       /* This is called by the CPU kernel to immediately load a tile. */
       /* TODO: resizing image_info is not thread safe for CPU rendering, there is
        * a workaround in the CPUDevice constructor. */
-      /* TODO: drop file handle. */
       [this, device, scene](
           size_t slot, int miplevel, int x, int y, KernelTileDescriptor *tile_descriptor) {
         /* If we can atomically set KERNEL_TILE_LOAD_REQUEST, this thread is responsible
@@ -549,8 +548,6 @@ void ImageManager::device_copy_image_textures(Device *device, Scene *scene)
           *tile_descriptor = tile_descriptor_new;
           return;
         }
-
-        /* TODO: tile handle does not get cleared. */
 
         /* Wait for other thread to load the tile. */
         OIIO::atomic_backoff backoff;
