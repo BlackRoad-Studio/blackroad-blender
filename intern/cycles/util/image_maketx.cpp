@@ -394,10 +394,6 @@ bool resolve_tx(const string &filepath,
     return false;
   }
 
-  if (string_endswith(filepath, ".tx")) {
-    return true;
-  }
-
   const string filedir = path_dirname(filepath);
 
   /* Check the specified directory if one is given. */
@@ -431,6 +427,13 @@ bool resolve_tx(const string &filepath,
     if (texture_cache_path.empty()) {
       out_filepath = tx_default_filepath;
     }
+  }
+
+  /* If it's already a tx file, we can use it directly as well. But it's
+   * preferable to use a Cycles native tx file for performance. */
+  if (string_endswith(filepath, ".tx")) {
+    out_filepath = filepath;
+    return true;
   }
 
   return false;
