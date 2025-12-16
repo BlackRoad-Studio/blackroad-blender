@@ -224,7 +224,7 @@ def get_arguments(filepath, output_filepath, use_hwrt, osl, ray_marching, textur
         args.extend(["--python-expr", "import bpy; bpy.context.scene.cycles.volume_biased = True"])
 
     texture_cache_pref = "bpy.context.preferences.filepaths.texture_cache_directory"
-    args.extend(["--python-expr", f"import bpy; {texture_cache_pref} = \"{texture_cache_dir}\""])
+    args.extend(["--python-expr", f"import bpy; {texture_cache_pref} = r\"{texture_cache_dir}\""])
 
     if subject == 'bake':
         args.extend(['--python', os.path.join(basedir, "util", "render_bake.py")])
