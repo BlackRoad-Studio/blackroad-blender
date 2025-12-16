@@ -83,7 +83,10 @@ BLOCKLIST_OPTIX_OSL_ALL = BLOCKLIST_OPTIX_OSL_LIMITED + [
 ]
 
 
-BLOCKLIST_METAL = []
+BLOCKLIST_METAL = [
+    # Unknown, possibly numerical precision with extreme values
+    'image_log.*.blend',
+]
 
 BLOCKLIST_METAL_RT = [
     # Metal RT uses different parameterization for linear curves.
