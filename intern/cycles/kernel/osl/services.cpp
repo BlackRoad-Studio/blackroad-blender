@@ -988,9 +988,8 @@ OSL::TextureSystem::TextureHandle *OSLRenderServices::get_texture_handle(
 OSL::TextureSystem::TextureHandle *OSLRenderServices::get_texture_handle(
     OSL::ustring filename, OSL::ShadingContext * /*context*/, const OSL::TextureOpt * /*options*/)
 {
-  /* TODO: Move UDIM to image itself so it works on CPU for arbitrary filenames, and on GPU. */
   auto [it, inserted] = textures.find_or_insert(filename,
-                                                OSLTextureHandle(OSLTextureHandle::IMAGE));
+                                                OSLTextureHandle(OSLTextureHandleType::IMAGE));
 
   if (inserted) {
     /* Load new textures using image manager. */
@@ -1008,35 +1007,20 @@ OSL::TextureSystem::TextureHandle *OSLRenderServices::get_texture_handle(
   }
 
   /* Packed SVM index on GPU. */
-  switch (it->second.type) {
-    case OSLTextureHandle::IMAGE:
-      return reinterpret_cast<OSL::TextureSystem::TextureHandle *>(OSL_TEXTURE_HANDLE_TYPE_SVM |
-                                                                   it->second.id);
-    case OSLTextureHandle::IES:
-      return reinterpret_cast<OSL::TextureSystem::TextureHandle *>(OSL_TEXTURE_HANDLE_TYPE_IES |
-                                                                   it->second.id);
-    case OSLTextureHandle::AO:
-      return reinterpret_cast<OSL::TextureSystem::TextureHandle *>(
-          OSL_TEXTURE_HANDLE_TYPE_AO_OR_BEVEL | 1);
-    case OSLTextureHandle::BEVEL:
-      return reinterpret_cast<OSL::TextureSystem::TextureHandle *>(
-          OSL_TEXTURE_HANDLE_TYPE_AO_OR_BEVEL | 2);
-  }
-
-  assert(0);
-  return nullptr;
+  return reinterpret_cast<OSL::TextureSystem::TextureHandle *>(
+      OSL_TEXTURE_HANDLE_ENCODE(it->second.type, it->second.id));
 }
 
 bool OSLRenderServices::good(OSL::TextureSystem::TextureHandle *texture_handle)
 {
   OSLTextureHandle *handle = (OSLTextureHandle *)texture_handle;
-  return handle->type != OSLTextureHandle::IMAGE && handle->id != KERNEL_IMAGE_NONE;
+  return handle->type != OSLTextureHandleType::IMAGE && handle->id != KERNEL_IMAGE_NONE;
 }
 
 bool OSLRenderServices::is_udim(OSL::TextureSystem::TextureHandle *texture_handle)
 {
   OSLTextureHandle *handle = (OSLTextureHandle *)texture_handle;
-  return handle->type == OSLTextureHandle::IMAGE && handle->id <= -1;
+  return handle->type == OSLTextureHandleType::IMAGE && handle->id <= -1;
 }
 
 bool OSLRenderServices::texture(OSLUStringHash filename,
@@ -1072,7 +1056,7 @@ bool OSLRenderServices::texture(OSLUStringHash filename,
   bool status = false;
 
   switch (handle->type) {
-    case OSLTextureHandle::BEVEL: {
+    case OSLTextureHandleType::BEVEL: {
 #ifdef __SHADER_RAYTRACE__
       /* Bevel shader hack. */
       if (nchannels >= 3 && state != nullptr) {
@@ -1087,7 +1071,7 @@ bool OSLRenderServices::texture(OSLUStringHash filename,
 #endif
       break;
     }
-    case OSLTextureHandle::AO: {
+    case OSLTextureHandleType::AO: {
 #ifdef __SHADER_RAYTRACE__
       /* AO shader hack. */
       if (state != nullptr) {
@@ -1110,7 +1094,7 @@ bool OSLRenderServices::texture(OSLUStringHash filename,
 #endif
       break;
     }
-    case OSLTextureHandle::IMAGE: {
+    case OSLTextureHandleType::IMAGE: {
       const differential2 duv = {{dsdx, dtdx}, {dsdy, dtdy}};
       const float4 rgba = kernel_image_interp_with_udim(
           kernel_globals, sd, handle->id, make_float2(s, t), duv);
@@ -1128,7 +1112,7 @@ bool OSLRenderServices::texture(OSLUStringHash filename,
       status = true;
       break;
     }
-    case OSLTextureHandle::IES: {
+    case OSLTextureHandleType::IES: {
       /* IES light. */
       result[0] = kernel_ies_interp(kernel_globals, handle->id, s, t);
       status = true;
@@ -1181,7 +1165,7 @@ bool OSLRenderServices::texture3d(OSLUStringHash filename,
   bool status = false;
 
   switch (handle->type) {
-    case OSLTextureHandle::IMAGE: {
+    case OSLTextureHandleType::IMAGE: {
       /* TODO: test this case. Different handle type? */
       const float3 P_float3 = make_float3(P.x, P.y, P.z);
       float4 rgba = kernel_image_interp_3d(
@@ -1200,9 +1184,9 @@ bool OSLRenderServices::texture3d(OSLUStringHash filename,
       status = true;
       break;
     }
-    case OSLTextureHandle::IES:
-    case OSLTextureHandle::AO:
-    case OSLTextureHandle::BEVEL: {
+    case OSLTextureHandleType::IES:
+    case OSLTextureHandleType::AO:
+    case OSLTextureHandleType::BEVEL: {
       status = false;
       break;
     }

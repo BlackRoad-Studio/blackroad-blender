@@ -1069,11 +1069,11 @@ ccl_device_extern bool rs_texture3d(ccl_private ShaderGlobals *sg,
                                     ccl_private float *dresultdr,
                                     ccl_private void *errormessage)
 {
-  const unsigned int type = OSL_TEXTURE_HANDLE_TYPE(texture_handle);
-  const unsigned int slot = OSL_TEXTURE_HANDLE_SLOT(texture_handle);
+  const OSLTextureHandleType type = OSL_TEXTURE_HANDLE_TYPE(texture_handle);
+  const int slot = OSL_TEXTURE_HANDLE_SLOT(texture_handle);
 
   switch (type) {
-    case OSL_TEXTURE_HANDLE_TYPE_SVM: {
+    case OSLTextureHandleType::IMAGE: {
       const float4 rgba = kernel_image_interp_3d(
           nullptr, sg->sd, slot, *P, INTERPOLATION_NONE, false);
       if (nchannels > 0) {

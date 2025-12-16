@@ -145,13 +145,10 @@ struct OSLNoiseOptions {};
 
 struct OSLTextureOptions {};
 
-#define OSL_TEXTURE_HANDLE_TYPE_IES ((uintptr_t)0x2 << 30)
-#define OSL_TEXTURE_HANDLE_TYPE_SVM ((uintptr_t)0x1 << 30)
-#define OSL_TEXTURE_HANDLE_TYPE_AO_OR_BEVEL ((uintptr_t)0x3 << 30)
+enum class OSLTextureHandleType : unsigned int { IMAGE = 0, IES = 1, BEVEL = 2, AO = 3 };
 
-#define OSL_TEXTURE_HANDLE_TYPE(handle) \
-  ((unsigned int)((uintptr_t)(handle) & ((uintptr_t)0x3 << 30)))
-#define OSL_TEXTURE_HANDLE_SLOT(handle) \
-  ((unsigned int)((uintptr_t)(handle) & ((uintptr_t)0x3FFFFFFF)))
+#define OSL_TEXTURE_HANDLE_ENCODE(type, slot) ((uintptr_t(type) << 32) | uintptr_t(slot))
+#define OSL_TEXTURE_HANDLE_TYPE(handle) OSLTextureHandleType(uintptr_t(handle) >> 32)
+#define OSL_TEXTURE_HANDLE_SLOT(handle) int(uint(uintptr_t(handle) & uintptr_t(0xFFFFFFFF)))
 
 CCL_NAMESPACE_END

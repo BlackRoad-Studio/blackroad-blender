@@ -47,13 +47,11 @@ struct ThreadKernelGlobalsCPU;
  * stored as follows: x:tile_a, y:svm_slot_a, z:tile_b, w:svm_slot_b etc. */
 
 struct OSLTextureHandle {
-  enum Type { IMAGE, IES, BEVEL, AO };
-
-  OSLTextureHandle(const Type type, const int id = -1) : type(type), id(id) {}
+  OSLTextureHandle(const OSLTextureHandleType type, const int id = -1) : type(type), id(id) {}
 
   OSLTextureHandle(const ImageHandle &handle) : id(handle.kernel_id()), handle(handle) {}
 
-  Type type = IMAGE;
+  OSLTextureHandleType type = OSLTextureHandleType::IMAGE;
   int id = -1;
   ImageHandle handle;
 };

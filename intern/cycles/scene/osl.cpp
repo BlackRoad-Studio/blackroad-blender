@@ -124,9 +124,9 @@ void OSLManager::device_update_pre(Device * /*device*/, Scene *scene)
   if (scene->shader_manager->use_osl()) {
     /* add special builtin texture types */
     foreach_render_services([](OSLRenderServices *services) {
-      services->textures.insert(OSLUStringHash("@ao"), OSLTextureHandle(OSLTextureHandle::AO));
+      services->textures.insert(OSLUStringHash("@ao"), OSLTextureHandle(OSLTextureHandleType::AO));
       services->textures.insert(OSLUStringHash("@bevel"),
-                                OSLTextureHandle(OSLTextureHandle::BEVEL));
+                                OSLTextureHandle(OSLTextureHandleType::BEVEL));
     });
   }
 }
@@ -1540,7 +1540,7 @@ void OSLCompiler::parameter_texture_ies(const char *name, const int svm_slot)
   /* IES light textures stored in SVM. */
   const ustring filename(string_printf("@svm%d", texture_shared_unique_id++).c_str());
   services->textures.insert(OSLUStringHash(filename),
-                            OSLTextureHandle(OSLTextureHandle::IES, svm_slot));
+                            OSLTextureHandle(OSLTextureHandleType::IES, svm_slot));
   parameter(name, filename);
 }
 
