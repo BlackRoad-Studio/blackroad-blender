@@ -84,7 +84,7 @@ device_image &ImageCache::alloc_full(Device *device,
 
   slot = device_images.size();
 
-  std::string name = string_printf("tex_image_%s_%03d", name_from_type(type), slot);
+  std::string name = string_printf("tex_image_%s_%03u", name_from_type(type), slot);
   unique_ptr<DeviceImage> img = make_unique<DeviceImage>(
       device, std::move(name), slot, type, interpolation, extension);
 
