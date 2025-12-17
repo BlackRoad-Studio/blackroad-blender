@@ -1019,11 +1019,11 @@ ccl_device_extern bool rs_texture(ccl_private ShaderGlobals *sg,
                                   ccl_private float *dresultdt,
                                   ccl_private void *errormessage)
 {
-  const unsigned int type = OSL_TEXTURE_HANDLE_TYPE(texture_handle);
-  const unsigned int slot = OSL_TEXTURE_HANDLE_SLOT(texture_handle);
+  const OSLTextureHandleType type = OSL_TEXTURE_HANDLE_TYPE(texture_handle);
+  const int slot = OSL_TEXTURE_HANDLE_SLOT(texture_handle);
 
   switch (type) {
-    case OSL_TEXTURE_HANDLE_TYPE_SVM: {
+    case OSLTextureHandleType::IMAGE: {
       ccl_private ShaderData *sd = sg->sd;
       const differential2 duv = {{dsdx, dtdx}, {dsdy, dtdy}};
       const float4 rgba = kernel_image_interp_with_udim(nullptr, sd, slot, make_float2(s, t), duv);
@@ -1041,7 +1041,7 @@ ccl_device_extern bool rs_texture(ccl_private ShaderGlobals *sg,
       }
       return true;
     }
-    case OSL_TEXTURE_HANDLE_TYPE_IES: {
+    case OSLTextureHandleType::IES: {
       if (nchannels > 0) {
         result[0] = kernel_ies_interp(nullptr, slot, s, t);
       }
